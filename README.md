@@ -18,9 +18,9 @@ An older database in `%APPDATA%\FactoryManagementSystem` is copied (never moved 
 The app never creates a second empty database by accident: first-run creation is an explicit screen.
 
 ## Roles
-owner, accountant, inventory manager, production supervisor, read-only auditor. The sidebar hides pages a role can't use;
-action buttons a role may not use are disabled. Owner-only: approve distributions, restore backups, manage users/settings,
-change ownership/profit shares, finalise jobs.
+three roles - **owner** (everything), **accountant** (all the daily work: money, stock, production, people, salaries; but no Dashboard, Insights, Partners, Profit Distribution, Reports, Settings, Users, Audit Log or Backup), **auditor** (sees everything except Dashboard, Insights, Settings and Users; changes nothing). Anyone who still had the old inventory manager / production supervisor role is switched off on upgrade (nothing deleted) - create a new user for them. The sidebar hides pages a role can't use;
+action buttons a role may not use are disabled. Owner-only: approve distributions, restore backups, create backups, manage users/settings,
+change ownership/profit shares. (Finalising a job is open to the accountant too.)
 
 ## Accounting rules (summary)
 Money = integer paisa, quantities = milli-units (no floats). Every posting is a balanced double entry; posted entries/stock
@@ -32,7 +32,7 @@ deduction is off unless enabled in Settings; no tax/EOBI rules are assumed. Fina
 
 ## Backup / restore
 Daily automatic backup (SQLite online-backup API, verified, retention applies to auto backups only), manual backups (optional second
-folder, e.g. USB), backup before migrations and before restore. Restore (owner): verify -> temp copy -> re-verify -> keep the
+folder, e.g. USB: it gets every manual AND automatic backup; the automatic one is re-checked every 30 minutes, so a USB plugged in later still gets today's copy; an unplugged USB never blocks the local copy), backup before migrations and before restore. Restore (owner): verify -> temp copy -> re-verify -> keep the
 current DB in `recovery\` -> activate. A damaged database is never overwritten automatically (Recovery screen).
 SQLite is NOT encrypted at rest - enable Windows BitLocker.
 

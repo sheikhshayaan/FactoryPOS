@@ -43,10 +43,10 @@ def _nav():
     from ui.pages.production_pages import JobsPage
     # (key, label, class, any-of permissions that make it visible)
     return [
-        ("dashboard", "Dashboard", DashboardPage, None),
-        ("insights", "Business Insights", InsightsPage, ["view_all"]),
+        ("dashboard", "Dashboard", DashboardPage, ["view_dashboard"]),
+        ("insights", "Business Insights", InsightsPage, ["view_insights"]),
         ("settings", "Factory Registration & Settings", SettingsPage, ["manage_users"]),
-        ("partners", "Partners & Investments", PartnersPage, ["view_all"]),
+        ("partners", "Partners & Investments", PartnersPage, ["view_partners"]),
         ("customers", "Customers", CustomersPage, ["view_all", "manage_jobs"]),
         ("suppliers", "Suppliers", SuppliersPage, ["view_all", "manage_suppliers"]),
         ("inventory", "Inventory & Purchases", InventoryPage, ["view_all", "view_inventory"]),
@@ -54,10 +54,10 @@ def _nav():
         ("labor", "Attendance & Salaries", AttendancePage, ["view_all", "manage_attendance", "manage_payroll"]),
         ("costing", "Cost Calculator", CostCalculatorPage, ["view_all"]),
         ("expenses", "Expenses", ExpensesPage, ["view_all"]),
-        ("profit", "Profit Distribution", ProfitPage, ["view_all"]),
+        ("profit", "Profit Distribution", ProfitPage, ["view_profit"]),
         ("reports", "Reports", ReportsPage, ["view_reports"]),
         ("audit", "Audit Logs", AuditPage, ["view_audit"]),
-        ("backup", "Backup & Restore", BackupPage, ["view_all"]),
+        ("backup", "Backup & Restore", BackupPage, ["view_backup"]),
         ("users", "User Management", UsersPage, ["manage_users"]),
     ]
 
@@ -136,7 +136,7 @@ class App(ctk.CTk):
         self.pages.clear()
         done = self._auto_accrue(announce=False)        # new month: last month's salaries are booked BEFORE the dashboard reads the books
         self._swap(MainScreen(self, self))
-        self.show("dashboard")
+        self.show(self.screen.first_key())              # the Dashboard for the owner; the first page this person may open for everyone else
         self._schedule_backup_check()
         if done and done["created"]:
             self.after(500, lambda: self._announce_accrual(done))
@@ -190,17 +190,16 @@ class App(ctk.CTk):
             if self.ctx.user is None or self.ctx.conn is None:
                 return
             self._auto_accrue(announce=True)
-            today = connection.utc_now()[:10]
-            due = self.ctx.conn.execute("SELECT 1 FROM backup_history WHERE kind='auto' AND status='ok' AND substr(created_at,1,10)=?", (today,)).fetchone() is None
-            if due:
-                def done(info, err):
-                    if self.ctx.conn is None:
+            conn = self.ctx.conn
+            due = bk.auto_backup_due(conn, settings_service.get(conn, "backup_dir", ""))
+            if due["local"] or due["extra"]:
+                def done(res, err):
+                    if self.ctx.conn is None or res is None:
                         return
-                    bk.record_backup(self.ctx.conn, "auto", info, str(err) if err else None)
-                    if info:
-                        bk.prune_auto(self.paths, int(settings_service.get(self.ctx.conn, "backup_retention", "30") or 30))
+                    keep = int(settings_service.get(self.ctx.conn, "backup_retention", "30") or 30)
+                    bk.record_auto_result(self.ctx.conn, res, keep, self.paths)
                     self.refresh_current()
-                run_bg(self, lambda: bk.create_backup(self.paths, "auto"), done)
+                run_bg(self, lambda: bk.run_auto_backup(self.paths, due), done)
             self._backup_job = self.after(30 * 60 * 1000, check)
         self._backup_job = self.after(60_000, check)
 
@@ -451,6 +450,10 @@ class MainScreen(ctk.CTkFrame):
         self.content.pack(side="left", fill="both", expand=True)
         self.page_cache: dict[str, ctk.CTkFrame] = {}
         self.key = None
+
+    def first_key(self) -> str | None:
+        have = {n[0] for n in self.nav}
+        return next((k for _g, keys in GROUPS for k in keys if k in have), None)
 
     def show(self, key: str):
         cls = {k: c for k, _l, c, _p in self.nav}.get(key)

@@ -43,7 +43,7 @@ class SettingsPage(Page):
         row("fiscal_year_start_month", "Financial year starts in month (1-12)", "7 = July (July-June). Dashboard quarters/years follow this.")
         row("absence_deduction_basis", "Absence deduction", "off = nothing is deducted automatically; calendar_days = suggest salary / days-in-month per absent day (you still confirm each payslip).", ["off", "calendar_days"])
         row("backup_retention", "Keep this many automatic daily backups", "Manual and safety backups are never deleted automatically.")
-        row("backup_dir", "Extra backup folder (optional)", "e.g. a USB drive. A second copy is written here on every manual backup. Nothing is ever uploaded online.", folder=True)
+        row("backup_dir", "Extra backup folder (optional)", "e.g. a USB drive. A second copy is written here on every manual backup and every automatic daily backup (re-tried every 30 minutes while the app is open, so a USB plugged in later still gets today's copy). Nothing is ever uploaded online.", folder=True)
         row("allow_negative_cash", "Allow cash to go below zero?", "0 = block payments when the cash balance is insufficient (recommended).", ["0", "1"])
         self.msg = ctk.CTkLabel(f, text="", text_color=T.GREEN); self.msg.pack(anchor="w", padx=18, pady=(10, 0))
         bar = ctk.CTkFrame(f, fg_color="transparent"); bar.pack(anchor="w", padx=18, pady=10)
@@ -220,7 +220,7 @@ class BackupPage(Page):
     def build(self):
         self.status = ctk.CTkLabel(self.body, text="", justify="left", anchor="w", font=T.font(14)); self.status.pack(fill="x")
         bar = self.toolbar()
-        self.button(bar, "Back up now", self.backup_now, None, T.GREEN)
+        self.button(bar, "Back up now", self.backup_now, "create_backup", T.GREEN)
         self.button(bar, "Check database health", self.check, None, T.BLUE)
         self.button(bar, "Restore from backup...", self.restore, "restore_backup", T.RED)
         self.busy = ctk.CTkLabel(bar, text="", text_color=T.AMBER); self.busy.pack(side="left", padx=10)
@@ -248,10 +248,13 @@ class BackupPage(Page):
         extra = st.get(self.conn, "backup_dir", "")
 
         def work():
-            out = [bk.create_backup(self.ctx.paths, "manual")]
-            if extra:
-                out.append(bk.create_backup(self.ctx.paths, "manual", dest_dir=extra))
-            return out
+            local = bk.create_backup(self.ctx.paths, "manual")      # a failure here is a real failure
+            if not extra:
+                return local, None, None
+            try:
+                return local, bk.create_backup(self.ctx.paths, "manual", dest_dir=extra), None
+            except bk.BackupError as e:                              # the app's own copy is safe; only the extra copy failed
+                return local, None, str(e)
 
         def done(res, err):
             self.busy.configure(text="")
@@ -259,9 +262,16 @@ class BackupPage(Page):
                 bk.record_backup(self.conn, "manual", None, str(err), self.user)
                 show_error(self, f"Backup failed: {err}")
             else:
-                for info in res:
-                    bk.record_backup(self.conn, "manual", info, None, self.user)
-                show_info(self, "Backup complete", "Saved and verified:\n" + "\n".join(str(i.path) for i in res))
+                local, extra_info, extra_err = res
+                bk.record_backup(self.conn, "manual", local, None, self.user)
+                if extra_info:
+                    bk.record_backup(self.conn, "manual", extra_info, None, self.user)
+                if extra_err:
+                    bk.record_backup(self.conn, "manual", None, extra_err, self.user, where=extra)
+                    show_info(self, "Saved, but not in the extra folder",
+                              f"Saved and verified:\n{local.path}\n\nThe extra copy could not be written to {extra}:\n{extra_err}\n\nCheck that the drive is plugged in, then press Back up now again.")
+                else:
+                    show_info(self, "Backup complete", "Saved and verified:\n" + "\n".join(str(i.path) for i in (local, extra_info) if i))
             self.refresh()
         run_bg(self, work, done)
 
@@ -297,7 +307,7 @@ class BackupPage(Page):
 
 class UsersPage(Page):
     title = "User Management"
-    subtitle = "Roles: owner, accountant, inventory manager, production supervisor, read-only auditor."
+    subtitle = "Three roles: owner (everything), accountant (daily work, no Dashboard / Insights / Partners / Profit / Reports / system pages), auditor (view only)."
 
     def build(self):
         bar = self.toolbar()

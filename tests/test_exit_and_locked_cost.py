@@ -9,7 +9,7 @@ from services import accounting_service as ac, auth_service as auth, payroll_ser
 @pytest.fixture
 def w(conn, owner):
     auth.create_user(conn, owner, "acc", "accountant-pw", "accountant")
-    auth.create_user(conn, owner, "sup", "supervisor-pw", "production_supervisor")
+    auth.create_user(conn, owner, "sup", "supervisor-pw", "auditor")
     ac.record_opening_cash(conn, owner, "1000000", "2026-09-01")
     e1 = pr.add_employee(conn, owner, emp_code="E1", name="Bilal", monthly_salary="30000", effective_from="2026-01-01", joined_on="2026-01-01")
     return dict(owner=owner, acc=auth.authenticate(conn, "acc", "accountant-pw"), sup=auth.authenticate(conn, "sup", "supervisor-pw"), e1=e1)

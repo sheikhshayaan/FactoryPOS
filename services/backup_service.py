@@ -79,12 +79,12 @@ def create_backup(paths: AppPaths, kind: str = "manual", *, dest_dir: Path | Non
     if kind not in ("auto", "manual", "pre_migration", "pre_restore"):
         raise BackupError("bad kind")
     dest_dir = Path(dest_dir) if dest_dir else paths.backups
-    dest_dir.mkdir(parents=True, exist_ok=True)
     final = dest_dir / f"factory_{_stamp()}_{kind}.db"
     tmp = final.with_suffix(".db.tmp")
     err: str | None = None
     info: BackupInfo | None = None
     try:
+        dest_dir.mkdir(parents=True, exist_ok=True)           # a missing / unplugged folder is a failed backup, reported as one
         src = connection.connect(paths.db)
         try:
             dst = sqlite3.connect(str(tmp))
@@ -100,7 +100,10 @@ def create_backup(paths: AppPaths, kind: str = "manual", *, dest_dir: Path | Non
                           connection.utc_now())
     except (OSError, sqlite3.Error, BackupError, connection.DatabaseError) as e:
         err = str(e)
-        tmp.unlink(missing_ok=True)
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass                                               # the folder itself is unreachable: nothing to clean up
     if record_conn is not None:
         _record(record_conn, kind, info, final, err, user)
     if err:
@@ -122,9 +125,10 @@ def _record(conn, kind, info, final, err, user) -> None:
         pass  # history is best effort; the backup file itself is what matters
 
 
-def record_backup(conn, kind: str, info: BackupInfo | None, error: str | None = None, user=None) -> None:
-    """Public history recorder for backups made on a worker thread (the connection stays on the UI thread)."""
-    _record(conn, kind, info, info.path if info else Path("-"), error, user)
+def record_backup(conn, kind: str, info: BackupInfo | None, error: str | None = None, user=None, where=None) -> None:
+    """Public history recorder for backups made on a worker thread (the connection stays on the UI thread).
+    `where` names the folder a FAILED backup was meant for (shown in the history)."""
+    _record(conn, kind, info, info.path if info else Path(where or "-"), error, user)
 
 
 def last_successful_backup(conn: sqlite3.Connection) -> str | None:
@@ -146,9 +150,66 @@ def daily_backup_if_due(paths: AppPaths, conn: sqlite3.Connection, *,
     return info
 
 
-def prune_auto(paths: AppPaths, keep: int) -> list[Path]:
-    """Delete only old *auto* backups beyond `keep`. Manual/pre_* are never pruned."""
-    files = sorted(paths.backups.glob("factory_*_auto.db"))
+# ------------------------------------------------------------------ automatic backups (app folder + the optional extra folder)
+def _ok_today(conn, folder: str | None, inside: bool) -> bool:
+    """Is there a successful auto backup made today inside `folder` (inside=True) or outside it (inside=False)?"""
+    today = connection.utc_now()[:10]
+    sql = "SELECT 1 FROM backup_history WHERE kind='auto' AND status='ok' AND substr(created_at,1,10)=?"
+    args: tuple = (today,)
+    if folder:
+        pre = str(Path(folder))
+        sql += " AND substr(path,1,?)" + ("=?" if inside else "<>?")
+        args += (len(pre), pre)
+    return conn.execute(sql, args).fetchone() is not None
+
+
+def auto_backup_due(conn, extra_dir: str | None) -> dict:
+    """What is still missing today: the copy in the app's folder and, if an extra folder is set, the copy there. Checked again every 30 minutes,
+    so a USB drive plugged in later in the day still gets today's copy."""
+    extra = (extra_dir or "").strip() or None
+    return {"local": not _ok_today(conn, extra, inside=False),
+            "extra": bool(extra) and not _ok_today(conn, extra, inside=True),
+            "extra_dir": extra}
+
+
+def run_auto_backup(paths: AppPaths, due: dict) -> dict:
+    """Make the missing copies. Safe on a worker thread (no database connection of the UI is used). A problem with the extra folder never stops the local copy."""
+    out = {"local": None, "local_err": None, "extra": None, "extra_err": None, "extra_dir": due.get("extra_dir")}
+    if due["local"]:
+        try:
+            out["local"] = create_backup(paths, "auto")
+        except BackupError as e:
+            out["local_err"] = str(e)
+    if due["extra"]:
+        try:
+            out["extra"] = create_backup(paths, "auto", dest_dir=due["extra_dir"])
+        except BackupError as e:
+            out["extra_err"] = str(e)
+    return out
+
+
+def record_auto_result(conn, res: dict, retention: int = DEFAULT_RETENTION_AUTO, paths: AppPaths | None = None) -> None:
+    """History + pruning for run_auto_backup's result. A failed extra copy is written once a day, not every 30 minutes."""
+    if res["local"] or res["local_err"]:
+        record_backup(conn, "auto", res["local"], res["local_err"])
+    if res["extra"]:
+        record_backup(conn, "auto", res["extra"])
+    elif res["extra_err"]:
+        pre = str(Path(res["extra_dir"]))
+        seen = conn.execute("SELECT 1 FROM backup_history WHERE kind='auto' AND status='failed' AND substr(created_at,1,10)=? AND substr(path,1,?)=?",
+                            (connection.utc_now()[:10], len(pre), pre)).fetchone()
+        if not seen:
+            record_backup(conn, "auto", None, res["extra_err"], where=pre)
+    if paths is not None:
+        if res["local"]:
+            prune_auto(paths, retention)
+        if res["extra"]:
+            prune_auto(paths, retention, directory=res["extra_dir"])
+
+
+def prune_auto(paths: AppPaths, keep: int, directory=None) -> list[Path]:
+    """Delete only old *auto* backups beyond `keep` (in the app's backups folder, or in `directory`). Manual/pre_* are never pruned."""
+    files = sorted(Path(directory).glob("factory_*_auto.db")) if directory else sorted(paths.backups.glob("factory_*_auto.db"))
     removed = []
     for f in files[:-keep] if keep > 0 else files:
         f.unlink(missing_ok=True)

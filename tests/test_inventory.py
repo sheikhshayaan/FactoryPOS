@@ -9,8 +9,8 @@ from services.units import UnitError, to_milli, to_paisa
 
 @pytest.fixture
 def users(conn, owner):
-    auth.create_user(conn, owner, "inv", "inventory-pw", "inventory_manager")
-    auth.create_user(conn, owner, "sup", "supervisor-pw", "production_supervisor")
+    auth.create_user(conn, owner, "inv", "inventory-pw", "accountant")
+    auth.create_user(conn, owner, "sup", "supervisor-pw", "auditor")
     auth.create_user(conn, owner, "aud", "auditor-pw1", "auditor")
     return {"owner": owner,
             "inv": auth.authenticate(conn, "inv", "inventory-pw"),
@@ -176,13 +176,15 @@ def test_reason_required_for_wastage_and_adjustment(conn, owner, fabric):
 
 
 def test_permissions(conn, users, fabric):
+    for who in ("aud", "sup"):                                   # auditors only look: they cannot receive, use, waste or adjust stock
+        with pytest.raises(auth.PermissionDenied):
+            inv.receive_stock(conn, users[who], material_id=fabric, qty="1", supplier_id=1, total_cost="1")
+    inv.receive_stock(conn, users["inv"], material_id=fabric, qty="10", supplier_id=1, total_cost="100")      # the accountant can
     with pytest.raises(auth.PermissionDenied):
-        inv.receive_stock(conn, users["aud"], material_id=fabric, qty="1", supplier_id=1, total_cost="1")
-    inv.receive_stock(conn, users["inv"], material_id=fabric, qty="10", supplier_id=1, total_cost="100")
-    with pytest.raises(auth.PermissionDenied):   # supervisor cannot receive
-        inv.receive_stock(conn, users["sup"], material_id=fabric, qty="1", supplier_id=1, total_cost="1")
-    inv.issue_stock(conn, users["sup"], material_id=fabric, qty="1")   # but can consume
-    with pytest.raises(auth.PermissionDenied):   # nor adjust/waste
+        inv.issue_stock(conn, users["sup"], material_id=fabric, qty="1")
+    inv.issue_stock(conn, users["inv"], material_id=fabric, qty="1")                                           # the accountant can use stock
+    inv.issue_stock(conn, users["inv"], material_id=fabric, qty="1", movement_type="wastage", reason="x")     # and book wastage
+    with pytest.raises(auth.PermissionDenied):
         inv.issue_stock(conn, users["sup"], material_id=fabric, qty="1", movement_type="wastage", reason="x")
 
 

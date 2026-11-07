@@ -15,7 +15,7 @@
 - Money stored as integer minor units (paisa); quantities as Decimal text with fixed scale.
 - Weighted-average cost; negative stock blocked by default.
 - Timestamps UTC ISO-8601; displayed in local time (Asia/Karachi).
-- Roles: owner, accountant, inventory_manager, production_supervisor, auditor. Owner-only: distributions, restore, user mgmt, ownership change, job finalisation.
+- Roles: owner, accountant, auditor (the inventory_manager and production_supervisor roles were removed). Owner-only: distributions, restore, backup creation, user mgmt, ownership change.
 
 ## Questions that materially affect money/inventory (need your answer before Phase 3-4)
 1. Is paper priced/consumed per meter only, or must individual physical rolls (with remainders) be tracked?

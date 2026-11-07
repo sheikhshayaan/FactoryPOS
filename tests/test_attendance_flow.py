@@ -15,14 +15,15 @@ def dt(s):
 @pytest.fixture
 def w(conn, owner):
     auth.create_user(conn, owner, "acc", "accountant-pw", "accountant")
-    auth.create_user(conn, owner, "sup", "supervisor-pw", "production_supervisor")
+    auth.create_user(conn, owner, "sup", "supervisor-pw", "accountant")
+    auth.create_user(conn, owner, "aud", "auditor-pw1", "auditor")
     ac.record_opening_cash(conn, owner, "1000000", "2026-09-01")
     e1 = pr.add_employee(conn, owner, emp_code="E1", name="Bilal", monthly_salary="30000", effective_from="2026-01-01", joined_on="2026-01-01")
     e2 = pr.add_employee(conn, owner, emp_code="E2", name="Sana", monthly_salary="45000", effective_from="2026-01-01", joined_on="2026-01-01",
                          cost_category="admin")
     conn.execute("UPDATE employees SET created_at='2026-01-02T00:00:00Z'")        # they were added long ago
     return dict(owner=owner, acc=auth.authenticate(conn, "acc", "accountant-pw"),
-                sup=auth.authenticate(conn, "sup", "supervisor-pw"), e1=e1, e2=e2)
+                sup=auth.authenticate(conn, "sup", "supervisor-pw"), aud=auth.authenticate(conn, "aud", "auditor-pw1"), e1=e1, e2=e2)
 
 
 def row(conn, eid, d):
@@ -139,9 +140,9 @@ def test_undo_rules(conn, w):
 
 def test_buttons_need_attendance_permission(conn, w):
     with pytest.raises(auth.PermissionDenied):
-        pr.clock_in(conn, w["acc"], w["e1"], dt("2026-10-05T08:00"))                 # accountant manages pay, not the gate
+        pr.clock_in(conn, w["aud"], w["e1"], dt("2026-10-05T08:00"))                 # an auditor only looks
     with pytest.raises(auth.PermissionDenied):
-        pr.mark_status(conn, w["acc"], w["e1"], "absent", dt("2026-10-05T08:00"))
+        pr.mark_status(conn, w["aud"], w["e1"], "absent", dt("2026-10-05T08:00"))
 
 
 def test_live_board_states(conn, w):
@@ -229,12 +230,12 @@ def test_auto_accrual_january_uses_previous_december():
 
 
 def test_auto_accrual_switch_and_permission(conn, w):
-    assert pr.auto_accrue_if_due(conn, w["sup"], date(2026, 11, 1)) is None         # supervisor may not run payroll
+    assert pr.auto_accrue_if_due(conn, w["aud"], date(2026, 11, 1)) is None         # an auditor may not run payroll
     conn.execute("UPDATE app_settings SET value='0' WHERE key='auto_accrue_payroll'")
     assert pr.auto_accrue_if_due(conn, w["owner"], date(2026, 11, 1)) is None
     assert conn.execute("SELECT COUNT(*) FROM payslips").fetchone()[0] == 0
     with pytest.raises(auth.PermissionDenied):
-        pr.auto_accrue_month(conn, w["sup"], "2026-10")                             # the manual 'accrue all' needs permission too
+        pr.auto_accrue_month(conn, w["aud"], "2026-10")                             # the manual 'accrue all' needs permission too
 
 
 def test_auto_accrual_leaves_mid_month_joiners_to_the_owner(conn, w):

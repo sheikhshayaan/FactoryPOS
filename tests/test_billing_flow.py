@@ -17,7 +17,7 @@ def w(conn, owner):
     inv.receive_stock(conn, owner, material_id=paper, qty="8", total_cost="40000", supplier_id=1)       # Rs 5,000 per roll
     inv.receive_stock(conn, owner, material_id=cloth, qty="100", unit_price="100", supplier_id=1)      # 100 m x Rs 100 = Rs 10,000
     inv.receive_stock(conn, owner, material_id=ink, qty="2", unit_price="450", supplier_id=1)      # 2 L x Rs 450 = Rs 900
-    auth.create_user(conn, owner, "sup", "supervisor-pw", "production_supervisor")
+    auth.create_user(conn, owner, "sup", "supervisor-pw", "auditor")
     auth.create_user(conn, owner, "acc", "accountant-pw", "accountant")
     return dict(paper=paper, cloth=cloth, ink=ink, cust=cust, sup=auth.authenticate(conn, "sup", "supervisor-pw"), acc=auth.authenticate(conn, "acc", "accountant-pw"))
 

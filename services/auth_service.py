@@ -10,7 +10,7 @@ from argon2.exceptions import InvalidHashError, VerifyMismatchError
 from database.connection import transaction, utc_now
 from services import audit_service
 
-ROLES = ("owner", "accountant", "inventory_manager", "production_supervisor", "auditor")
+ROLES = ("owner", "accountant", "auditor")
 MAX_FAILED = 5
 LOCKOUT_MINUTES = 5
 MIN_PASSWORD_LEN = 8
@@ -29,19 +29,20 @@ SECURITY_QUESTIONS = (
 
 # Permissions are explicit; anything not listed is denied.
 PERMISSIONS: dict[str, frozenset[str]] = {
+    # owner: everything
     "owner": frozenset({"*"}),
+    # accountant: everything the owner does in the day-to-day work (money, stock, production, people, salaries), but NOT the Dashboard, Insights,
+    # Partners, Profit Distribution, Reports or the system pages (Settings, Users, Audit Log, Backup)
     "accountant": frozenset({
-        "view_all", "post_journal", "record_payment", "record_expense", "manage_payroll",
-        "manage_invoices", "record_capital", "view_reports", "export_reports", "view_audit"}),
-    "inventory_manager": frozenset({
-        "view_inventory", "receive_stock", "adjust_stock", "manage_suppliers", "view_reports"}),
-    "production_supervisor": frozenset({
-        "view_inventory", "manage_jobs", "consume_stock", "manage_attendance", "manage_machines"}),
-    "auditor": frozenset({"view_all", "view_reports", "export_reports", "view_audit"}),
+        "view_all", "post_journal", "record_payment", "record_expense", "manage_payroll", "manage_invoices", "record_capital",
+        "view_inventory", "receive_stock", "adjust_stock", "manage_suppliers", "manage_jobs", "consume_stock",
+        "manage_attendance", "manage_machines", "finalize_job"}),
+    # auditor: sees everything except the Dashboard and Insights (and owner-only Settings / Users), changes nothing
+    "auditor": frozenset({
+        "view_all", "view_reports", "export_reports", "view_audit", "view_partners", "view_profit", "view_backup"}),
 }
 # Only these actions are ever restricted to owner, even though owner has '*'.
-OWNER_ONLY = frozenset({"approve_distribution", "restore_backup", "manage_users",
-                        "change_ownership", "finalize_job"})
+OWNER_ONLY = frozenset({"approve_distribution", "restore_backup", "manage_users", "change_ownership", "create_backup"})
 
 _ph = PasswordHasher()
 
@@ -254,6 +255,10 @@ def reset_password_with_answer(conn: sqlite3.Connection, username: str, answer: 
 def set_active(conn: sqlite3.Connection, actor, user_id: int, active: bool) -> None:
     require_permission(actor, "manage_users")
     with transaction(conn):
+        if active:
+            role = conn.execute("SELECT role FROM users WHERE id=?", (user_id,)).fetchone()
+            if role and role["role"] not in ROLES:
+                raise AuthError("This user has an old role that no longer exists. Create a new user with the owner, accountant or auditor role instead.")
         if not active:
             owners = conn.execute(
                 "SELECT COUNT(*) FROM users WHERE role='owner' AND is_active=1 AND id<>?", (user_id,)

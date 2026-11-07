@@ -7,13 +7,14 @@ from services.units import to_paisa as P
 @pytest.fixture
 def w(conn, owner):
     auth.create_user(conn, owner, "acc", "accountant-pw", "accountant")
-    auth.create_user(conn, owner, "sup", "supervisor-pw", "production_supervisor")
+    auth.create_user(conn, owner, "sup", "supervisor-pw", "accountant")
+    auth.create_user(conn, owner, "aud", "auditor-pw1", "auditor")
     ac.record_opening_cash(conn, owner, "1000000", "2026-09-01")
     e1 = pr.add_employee(conn, owner, emp_code="E1", name="Bilal", monthly_salary="30000", effective_from="2026-01-01")
     e2 = pr.add_employee(conn, owner, emp_code="E2", name="Sana", monthly_salary="45000", effective_from="2026-01-01",
                          cost_category="admin")
     return dict(owner=owner, acc=auth.authenticate(conn, "acc", "accountant-pw"),
-                sup=auth.authenticate(conn, "sup", "supervisor-pw"), e1=e1, e2=e2)
+                sup=auth.authenticate(conn, "sup", "supervisor-pw"), aud=auth.authenticate(conn, "aud", "auditor-pw1"), e1=e1, e2=e2)
 
 
 # ---------- attendance ----------
@@ -33,8 +34,8 @@ def test_attendance_unique_and_correction_history(conn, w):
     assert conn.execute("SELECT worked_minutes FROM attendance WHERE id=?", (a,)).fetchone()[0] == 390
     with pytest.raises(pr.PayrollError):
         pr.record_attendance(conn, w["sup"], w["e1"], "2026-10-01", "present")
-    with pytest.raises(auth.PermissionDenied):                                       # supervisor cannot self-approve fixes
-        pr.correct_attendance(conn, w["sup"], a, "typo", clock_out="2026-10-02T06:00")
+    with pytest.raises(auth.PermissionDenied):                                       # an auditor cannot change records
+        pr.correct_attendance(conn, w["aud"], a, "typo", clock_out="2026-10-02T06:00")
     with pytest.raises(pr.PayrollError):
         pr.correct_attendance(conn, w["acc"], a, "", clock_out="2026-10-02T06:00")
     pr.correct_attendance(conn, w["acc"], a, "forgot to clock out", clock_out="2026-10-02T06:00")
@@ -136,9 +137,9 @@ def test_salary_history_dated_and_audited(conn, w):
     assert conn.execute("SELECT COUNT(*) FROM audit_log WHERE action='salary.change'").fetchone()[0] == 1
 
 
-def test_supervisor_cannot_run_payroll(conn, w):
+def test_auditor_cannot_run_payroll(conn, w):
     with pytest.raises(auth.PermissionDenied):
-        pr.accrue_salary(conn, w["sup"], w["e1"], "2026-10")
+        pr.accrue_salary(conn, w["aud"], w["e1"], "2026-10")
 
 
 def test_payroll_blocked_by_no_cash_but_accrual_ok(conn, w):

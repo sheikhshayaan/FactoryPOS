@@ -13,7 +13,7 @@ def world(conn, owner):
     paper = inv.add_material(conn, owner, "Paper", "paper", "roll", reorder_level="4")
     cust = inv.add_customer(conn, owner, "Ali")
     cust2 = inv.add_customer(conn, owner, "Zed")
-    auth.create_user(conn, owner, "sup", "supervisor-pw", "production_supervisor")
+    auth.create_user(conn, owner, "sup", "supervisor-pw", "accountant")
     auth.create_user(conn, owner, "aud", "auditor-pw1", "auditor")
     return dict(paper=paper, cust=cust, cust2=cust2, sup=auth.authenticate(conn, "sup", "supervisor-pw"), aud=auth.authenticate(conn, "aud", "auditor-pw1"))
 
@@ -68,7 +68,7 @@ def test_return_needs_a_reason_and_the_right_kind_of_line(conn, owner, world):
         js.return_material(conn, owner, j, lid, "  ")
     with pytest.raises(js.JobError):
         js.return_material(conn, owner, j, 9999, "x")
-    js.return_material(conn, world["sup"], j, lid, "supervisor can undo their own entry")        # consume_stock permission is enough
+    js.return_material(conn, world["sup"], j, lid, "accountant can undo a stock entry")        # consume_stock permission is enough
     with pytest.raises(auth.PermissionDenied):
         js.return_material(conn, world["aud"], j, lid, "x")
 
@@ -187,7 +187,7 @@ def test_undo_is_refused_when_unsafe(conn, owner, world):
     with pytest.raises(inv.InventoryError):
         inv.undo_receipt(conn, owner, b, "")
     with pytest.raises(auth.PermissionDenied):
-        inv.undo_receipt(conn, world["sup"], b, "x")
+        inv.undo_receipt(conn, world["aud"], b, "x")
     assert acct.check_integrity(conn) == []
 
 

@@ -8,8 +8,9 @@ from services.units import to_paisa
 
 @pytest.fixture
 def world(conn, owner):
-    auth.create_user(conn, owner, "sup", "supervisor-pw", "production_supervisor")
+    auth.create_user(conn, owner, "sup", "supervisor-pw", "accountant")
     sup = auth.authenticate(conn, "sup", "supervisor-pw")
+    auth.create_user(conn, owner, "aud", "auditor-pw1", "auditor")
     paper = inv.add_material(conn, owner, "Paper", "consumable", "m", tracks_rolls=True)   # roll-by-roll engine fixture (see test_paper_in_rolls.py)
     ink = inv.add_material(conn, owner, "Ink", "ink", "ml")
     fabric = inv.add_material(conn, owner, "Kapra", "fabric", "m")
@@ -18,7 +19,7 @@ def world(conn, owner):
     inv.receive_stock(conn, owner, material_id=ink, qty="10000", supplier_id=1, total_cost="50000")           # Rs5/ml
     inv.receive_stock(conn, owner, material_id=fabric, qty="500", supplier_id=1, total_cost="50000")          # Rs100/m
     inv.receive_stock(conn, owner, material_id=fabric, qty="300", ownership="customer", customer_id=cust)
-    return dict(owner=owner, sup=sup, paper=paper, ink=ink, fabric=fabric, cust=cust)
+    return dict(owner=owner, sup=sup, aud=auth.authenticate(conn, "aud", "auditor-pw1"), paper=paper, ink=ink, fabric=fabric, cust=cust)
 
 
 def mk(conn, w, no, src):
@@ -97,22 +98,22 @@ def test_meter_based_electricity_actual(conn, world):
 def test_wastage_counted_once_not_double(conn, world):
     w = world; j = mk(conn, w, "J-W", "factory")
     js.consume_material(conn, w["sup"], j, w["paper"], "100")
-    with pytest.raises(auth.PermissionDenied):
-        js.consume_material(conn, w["sup"], j, w["paper"], "10", wastage=True, reason="torn")
+    with pytest.raises(auth.PermissionDenied):                  # an auditor cannot book wastage
+        js.consume_material(conn, w["aud"], j, w["paper"], "10", wastage=True, reason="torn")
     js.consume_material(conn, w["owner"], j, w["paper"], "10", wastage=True, reason="torn")
     c = js.costing(conn, j)
     assert c.by_kind == {"material": to_paisa("2000"), "wastage": to_paisa("200")} and c.total_paisa == to_paisa("2200")
 
 
-def test_finalize_requires_owner_and_completed_and_locks(conn, world):
+def test_finalize_needs_the_right_role_and_completed_and_locks(conn, world):
     w = world; j = mk(conn, w, "J-X", "factory")
     js.consume_material(conn, w["sup"], j, w["paper"], "100")
     with pytest.raises(js.JobError):
         js.finalize_job(conn, w["owner"], j, "5000")          # not completed
     js.set_status(conn, w["sup"], j, "completed")
     with pytest.raises(auth.PermissionDenied):
-        js.finalize_job(conn, w["sup"], j, "5000")
-    out = js.finalize_job(conn, w["owner"], j, "5000")
+        js.finalize_job(conn, w["aud"], j, "5000")            # an auditor cannot
+    out = js.finalize_job(conn, w["sup"], j, "5000")          # the accountant can (same as the owner)
     assert out["cost_paisa"] == to_paisa("2000") and out["profit_paisa"] == to_paisa("3000")
     with pytest.raises(js.JobError):
         js.consume_material(conn, w["sup"], j, w["paper"], "1")

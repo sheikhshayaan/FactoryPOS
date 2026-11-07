@@ -34,7 +34,7 @@ def populated(tmp_path):
     c = initialize_new_database(paths)
     auth.create_user(c, None, "boss", "correct-horse", "owner", "The Boss")
     o = auth.authenticate(c, "boss", "correct-horse")
-    for n, r in (("acc", "accountant"), ("invm", "inventory_manager"), ("aud", "auditor"), ("sup", "production_supervisor")):
+    for n, r in (("acc", "accountant"), ("aud", "auditor")):
         auth.create_user(c, o, n, "password-123", r)
     from services import settings_service
     settings_service.set_values(c, o, {"factory_name": "Test Mills"})
@@ -184,16 +184,27 @@ def test_dashboard_numbers_come_from_database(app):
     assert dash.cards["cash"].value.cget("text") == "Rs 920,000.00"       # 500k opening + 400k capital + 20k received
 
 
+ACCOUNTANT_PAGES = {"customers", "suppliers", "inventory", "jobs", "labor", "costing", "expenses"}
+AUDITOR_PAGES = ACCOUNTANT_PAGES | {"partners", "profit", "reports", "audit", "backup"}
+
+
 def test_role_based_navigation_and_disabled_actions(populated):
-    for user, expect_hidden in (("invm", {"labor", "users", "partners"}), ("aud", {"users", "settings"}), ("sup", {"users", "partners", "expenses"})):
+    for user, pages, landing in (("acc", ACCOUNTANT_PAGES, "jobs"), ("aud", AUDITOR_PAGES, "jobs")):
         a = appmod.App(populated); a.update()
         try:
             login(a, user, "password-123")
             visible = {k for k, *_ in a.screen.nav}
-            assert not (visible & expect_hidden), (user, visible & expect_hidden)
-            assert "dashboard" in visible
+            assert visible == pages, (user, visible ^ pages)
+            assert not (visible & {"dashboard", "insights", "settings", "users"})                 # neither of them ever sees these
+            assert a.screen.key == landing                                                         # lands on the first page they may open, not on a Dashboard they cannot see
         finally:
             a.on_close()
+    a = appmod.App(populated); a.update()
+    try:
+        login(a, "boss", "correct-horse")
+        assert len(a.screen.nav) == 16 and a.screen.key == "dashboard"
+    finally:
+        a.on_close()
     a = appmod.App(populated); a.update()
     try:
         login(a, "aud", "password-123")
@@ -489,12 +500,12 @@ def test_buttons_are_locked_for_roles_that_only_look(populated):
         a.on_close()
 
 
-def test_supervisor_sees_the_gate_but_not_salaries(populated):
+def test_accountant_uses_the_gate_and_the_salaries(populated):
     a = appmod.App(populated); a.update()
     try:
-        login(a, "sup", "password-123"); a.show("labor"); a.update()
+        login(a, "acc", "password-123"); a.show("labor"); a.update()
         page = a.screen.page_cache["labor"]
-        assert list(page.tabs._tab_dict) == ["Today", "Records"]
+        assert {"Today", "Month & Salaries", "Records", "Employees"} <= set(page.tabs._tab_dict)
         eid = _emp_id(a)
         assert _enabled(page, eid, "in")
         page.press(eid, "in"); a.update()
@@ -1022,3 +1033,24 @@ def test_profit_page_shows_both_tables_on_a_small_window(app):
         assert w.winfo_viewable() and w.winfo_height() >= 60
         assert w.winfo_rooty() + w.winfo_height() <= top + 2                       # nothing is cut off at the bottom of the window
     assert page.pay_all_btn.winfo_viewable()
+
+
+def test_backup_now_with_unreachable_extra_folder_keeps_local_copy(app, monkeypatch, tmp_path):
+    from services import settings_service as st
+    import time
+    login(app); app.show("backup"); app.update()
+    page = app.screen.page_cache["backup"]
+    blocker = tmp_path / "drive"; blocker.write_text("x")                      # its sub-folder can never be created
+    st.set_values(app.ctx.conn, app.ctx.user, {"backup_dir": str(blocker / "usb")})
+    shown = []
+    monkeypatch.setattr("ui.pages.admin_pages.show_info", lambda *a, **k: shown.append(a))
+    monkeypatch.setattr("ui.pages.admin_pages.show_error", lambda *a, **k: shown.append(("ERR",) + a))
+    page.backup_now()
+    for _ in range(100):
+        app.update()
+        if shown:
+            break
+        time.sleep(0.05)
+    assert shown and shown[0][0] != "ERR" and "extra folder" in shown[0][1]
+    rows = [r for r in q.backups(app.ctx.conn) if r["kind"] == "manual"]
+    assert sorted(r["status"] for r in rows) == ["failed", "ok"]
