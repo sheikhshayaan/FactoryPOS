@@ -1,0 +1,24 @@
+__pycache__/
+*.pyc
+*.db
+*.db-wal
+*.db-shm
+backups/
+data/
+exports/
+logs/
+dist/
+build/
+*.spec
+.pytest_cache/
+.venv/
+_data_keep/
+
+# private factory data and local files - never publish these
+recovery/
+cost_calculator.json
+ui.json
+*.tmp
+*.tmp-shm
+*.tmp-wal
+*.bak
