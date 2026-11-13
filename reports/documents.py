@@ -32,6 +32,28 @@ def _esc(s):
     return str(s or "").replace("&", "&amp;").replace("<", "&lt;")
 
 
+def _paper_used(conn, job_id) -> list[tuple[str, bool, int]]:
+    """Paper this entry really used (cancelled/returned lines netted off): [(material name, is the customer's own paper, meters in milli-meters)].
+    Paper kept in rolls is turned into meters with the roll length; paper kept in meters is used as it is."""
+    if not job_id:
+        return []
+    rows = conn.execute(
+        "SELECT m.name, CASE WHEN COALESCE(o.basis, jc.basis) LIKE 'customer%' THEN 1 ELSE 0 END mine, SUM(jc.qty_milli) q, m.base_unit, m.roll_length_milli "
+        "FROM job_costs jc JOIN materials m ON m.id=jc.material_id LEFT JOIN job_costs o ON o.id=jc.reverses_id "
+        "WHERE jc.job_id=? AND jc.kind IN ('material','wastage') AND m.category='paper' GROUP BY m.id, mine HAVING SUM(jc.qty_milli) > 0 "
+        "ORDER BY m.name, mine", (job_id,)).fetchall()
+    out = []
+    for name, mine, q, unit, roll in rows:
+        meters_milli = round(q * roll / 1000) if (unit == "roll" and roll) else q
+        out.append((name, bool(mine), meters_milli))
+    return out
+
+
+def _meters(milli: int) -> str:
+    """Whole meters, e.g. 249.9 -> 250 (the stored value is untouched)."""
+    return f"{(milli + 500) // 1000:,}"
+
+
 def invoice_pdf(conn, invoice_id: int, path) -> Path:
     i = conn.execute("SELECT i.*, c.name cname, c.address caddr, j.job_no, j.product_type FROM invoices i JOIN customers c ON c.id=i.customer_id "
                      "LEFT JOIN jobs j ON j.id=i.job_id WHERE i.id=?", (invoice_id,)).fetchone()
@@ -45,6 +67,8 @@ def invoice_pdf(conn, invoice_id: int, path) -> Path:
             [_esc(f"Printing services{' - job ' + i['job_no'] if i['job_no'] else ''}{' (' + i['product_type'] + ')' if i['product_type'] else ''}"), _rs(i["total_paisa"])]]
     if i["pieces"] and i["rate_paisa"]:
         rows.append([_esc(f"{i['pieces']:,} m x {cur} {_rs(i['rate_paisa'])} per meter"), ""])
+    for name, mine, meters_milli in _paper_used(conn, i["job_id"]):
+        rows.append([_esc(f"Arz Used: {name} ({'customer' + chr(39) + 's own paper' if mine else 'factory paper'}) - {_meters(meters_milli)} m"), ""])
     foot = [f"<b>Total: {cur} {_rs(i['total_paisa'])}</b>", f"Received: {cur} {_rs(paid)}", f"<b>Balance due: {cur} {_rs(i['total_paisa'] - paid)}</b>"]
     return _doc(path, head, rows, foot, widths=[380, 120])
 

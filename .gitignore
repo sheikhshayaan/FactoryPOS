@@ -22,3 +22,4 @@ ui.json
 *.tmp-shm
 *.tmp-wal
 *.bak
+services/registration_local.py

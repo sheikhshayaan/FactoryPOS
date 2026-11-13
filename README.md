@@ -143,3 +143,14 @@ The **Complete Business Summary** button on the Reports page makes one PDF of ab
 - **Resign / Remove** (Attendance & Salaries > Employees): records the last working day and whether the person resigned or was removed. The employee leaves the Today board and no later month is accrued; attendance, payslips and advances stay on file. The last month can still be accrued and paid by hand. **Bring back** undoes it (reason required). No advance can be given to someone who has left.
 - **Lock cost per meter** (Cost Calculator): type the figure you decide on (e.g. 170 when the calculation says 167.97) and press Lock. Create invoice shows it as the cost per meter for every entry, with the stock-based figure underneath, and the profit preview uses it. It is only a displayed figure: nothing is posted to the books. Clear calculations does not remove it; Unlock does.
 
+## Registration approval (e-mailed code)
+Registering a NEW factory on a computer needs a 6-digit code that is e-mailed to the software owner, who gives it to the person (by phone).
+Needs the internet for that one step only; the program itself stays offline. Sent: the name typed on the screen, the code, and an anonymous computer code.
+A factory that already exists is never asked again (so copying a finished data folder to another PC is not blocked by this).
+
+One-time setup (owner):
+1. Go to script.google.com > New project, paste `docs/registration_mail.gs`, change `SECRET` to a long random text.
+2. Deploy > New deployment > type Web app > Execute as **Me**, Who has access **Anyone**. Allow the mail permission when asked. Copy the Web app URL.
+3. Create `services/registration_local.py` containing `REGISTER_URL = "..."` (the URL) and `REGISTER_SECRET = "..."` (same text as SECRET), then rebuild the .exe. This file is in `.gitignore`, so your secret is never pushed to GitHub, but it is packed into the .exe.
+A built .exe without `REGISTER_URL` refuses to register anyone (on purpose). If the URL is ever misused, deploy a new version with a new SECRET.
+

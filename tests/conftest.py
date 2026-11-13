@@ -29,3 +29,11 @@ def owner(conn):
     from services import auth_service as a
     a.create_user(conn, None, "boss", "correct-horse", "owner")
     return a.authenticate(conn, "boss", "correct-horse")
+
+
+@pytest.fixture(autouse=True)
+def _no_registration_gate(monkeypatch):
+    """A developer's own services/registration_local.py must not put the code screen in front of every test."""
+    from services import registration_service
+    monkeypatch.setattr(registration_service, "REGISTER_URL", "")
+    monkeypatch.setattr(registration_service, "REGISTER_SECRET", "")

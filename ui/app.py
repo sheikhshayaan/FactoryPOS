@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 import json
 import logging.handlers
+import time
 import tkinter as tk
 from tkinter import filedialog
 
@@ -13,6 +14,7 @@ from config.paths import AppPaths, get_paths
 from database import connection
 from database.connection import DatabaseError
 from services import auth_service as auth, backup_service as bk, payroll_service as pr, settings_service
+from services import registration_service as reg
 from services.startup import initialize_new_database, open_database
 from ui import theme as T
 from ui.base import Context
@@ -109,6 +111,7 @@ class App(ctk.CTk):
         self.current_key: str | None = None
         self.screen: ctk.CTkFrame | None = None
         self._backup_job = None
+        self.registration_ok = False                 # set by the code screen; only a NEW factory on this computer needs it
         self.start()
 
     # ---------------------------------------------------------------- screens
@@ -121,7 +124,8 @@ class App(ctk.CTk):
     def start(self):
         self.pages.clear(); self.current_key = None
         if not self.paths.db.exists():
-            self._swap(FirstRunScreen(self, self))
+            approved = not reg.required() or self.registration_ok
+            self._swap(FirstRunScreen(self, self) if approved else RegisterScreen(self, self))
             return
         try:
             self.ctx.conn = open_database(self.paths)
@@ -285,6 +289,69 @@ class LoginScreen(_Center):
         self.app.logged_in(user)
 
 
+class RegisterScreen(_Center):
+    """Step 1 of registering a NEW factory on a computer: a 6-digit code is e-mailed to the software owner, who gives it to you."""
+    def __init__(self, parent, app):
+        super().__init__(parent, app)
+        self.challenge: reg.Challenge | None = None
+        self.sending = False
+        ctk.CTkLabel(self.pad, text="Register this software", font=T.font(24, "bold"), text_color=T.TEXT).pack()
+        ctk.CTkLabel(self.pad, text="Press Send code. A 6-digit code goes to the person who gave you the software.\nCall him, get the code and type it below.",
+                     text_color=T.MUTED, font=T.font(13), justify="center").pack(pady=(2, 8))
+        self.who = self.entry("Your name and business", gap=10)
+        self.send_btn = make_button(self.pad, "Send code", self.send, "secondary", width=380, height=42)
+        self.send_btn.pack(pady=(12, 0))
+        self.code = self.entry("6-digit code", gap=14)
+        self.msg = ctk.CTkLabel(self.pad, text="", text_color=T.BAD, wraplength=380, font=T.font(13))
+        self.msg.pack(pady=(10, 0))
+        self.btn = make_button(self.pad, "Continue", self.go, "primary", width=380, height=44)
+        self.btn.pack(pady=(10, 0))
+        ctk.CTkLabel(self.pad, text="Needs the internet for this step only. What is sent: the name you type above, the code and an anonymous "
+                     "computer code. The program itself works fully offline.", text_color=T.MUTED, font=T.font(12), wraplength=380,
+                     justify="left").pack(pady=(10, 0), anchor="w")
+        self.who.focus_set()
+        self.code.bind("<Return>", lambda _e: self.go())
+
+    def _say(self, text, bad=True):
+        self.msg.configure(text=text, text_color=T.BAD if bad else T.GREEN)
+
+    def send(self):
+        if self.sending:
+            return
+        if not self.who.get().strip():
+            self._say("Type your name and business first."); return
+        if self.challenge and time.time() - self.challenge.created < reg.RESEND_AFTER_S:
+            self._say(f"A code was just sent. Wait {reg.RESEND_AFTER_S} seconds before asking for another one."); return
+        code = reg.new_code()
+        self.sending = True
+        self.send_btn.configure(state="disabled", text="Sending...")
+        self._say("")
+
+        def done(_res, err):
+            self.sending = False
+            if not self.winfo_exists():
+                return
+            self.send_btn.configure(state="normal", text="Send code again")
+            if err:
+                self._say(str(err) if isinstance(err, reg.RegistrationError) else "Could not send the code. Try again.")
+                return
+            self.challenge = reg.Challenge(code)
+            self._say("Code sent. Ask the software owner for it and type it below. It is valid for 10 minutes.", bad=False)
+            self.code.focus_set()
+        who = self.who.get()                                 # read the box here: widgets must not be touched from the worker thread
+        run_bg(self, lambda: reg.request_code(who, code), done)
+
+    def go(self):
+        if self.challenge is None:
+            self._say("Press Send code first."); return
+        try:
+            self.challenge.check(self.code.get())
+        except reg.RegistrationError as e:
+            self.code.delete(0, "end"); self._say(str(e)); return
+        self.app.registration_ok = True
+        self.app.start()
+
+
 class FirstRunScreen(_Center):
     def __init__(self, parent, app):
         super().__init__(parent, app)
@@ -314,6 +381,8 @@ class FirstRunScreen(_Center):
             self.err.configure(text="Passwords do not match."); return
         if not self.fn.get().strip() or not self.un.get().strip():
             self.err.configure(text="Factory name and username are required."); return
+        if reg.required() and not self.app.registration_ok:
+            self.err.configure(text="This computer is not registered yet."); return
         sq, sa = self.read_security()
         try:
             auth._validate_security(sq, sa)                  # check BEFORE the database file is created

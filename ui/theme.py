@@ -106,11 +106,10 @@ def qty(milli: int | None, unit: str = "") -> str:
 
 
 def meters(milli: int | None) -> str:
-    """Milli-meters as '3,000 m' / '99.9 m' (one decimal at most, trailing zeros dropped)."""
+    """Milli-meters as whole meters for display: '3,000 m', 249.9 shows as '250 m' (the stored value is untouched)."""
     if milli is None:
         return "-"
-    s = f"{(Decimal(milli) / 1000).quantize(Decimal('0.1'), rounding='ROUND_HALF_UP'):,.1f}".rstrip("0").rstrip(".")
-    return f"{s} m"
+    return f"{(Decimal(milli) / 1000).quantize(Decimal('1'), rounding='ROUND_HALF_UP'):,.0f} m"
 
 
 def qty_full(milli: int | None, unit: str = "", roll_length_milli: int | None = None) -> str:
