@@ -545,14 +545,12 @@ class AttendancePage(Page):
         return f"{d}T{tin}", f"{out_day}T{tout}"
 
     def add_day(self):
-        sel = self.att.selected() or self.emp.selected()                          # the employee selected in the log (or on the Employees tab)
-        who = (sel.get("employee_id") or sel.get("id")) if sel else ""
         def submit(v):
             ci, co = self._times(v["d"], v["in"], v["out"], v["nx"], v["st"])
             pr.record_attendance(self.conn, self.user, v["e"], v["d"], v["st"], shift=v["sh"], clock_in=ci, clock_out=co,
                                  break_minutes=int(v["br"] or 0), notes=v["nt"])
         self.form("Add a past day", [
-            Field("e", "Employee", "choice", self._emps(), who), Field("d", "Day (the day the shift started)", "date"),
+            Field("e", "Employee", "choice", self._emps()), Field("d", "Day (the day the shift started)", "date"),
             Field("st", "Status", "choice", [("Present", "present"), ("Half day", "half_day"), ("Absent", "absent"), ("Leave", "leave")]),
             Field("in", "IN time", "time"), Field("out", "OUT time", "time"),
             Field("nx", "OUT happened", "choice", [("The same day", "same"), ("The next day (night shift)", "next")]),

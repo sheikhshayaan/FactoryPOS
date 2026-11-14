@@ -8,7 +8,7 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
 
 from services import dashboard_service as ds, queries as q, settings_service
-from ui import smooth, theme as T
+from ui import theme as T
 from ui.base import Page
 from ui.widgets import Col, DataTable, DateField, Stat, StatBox, make_button, make_tabs, show_error, surface
 
@@ -142,9 +142,6 @@ class DashboardPage(Page):
         self._chart(s["chart_monthly"])
 
     def _chart(self, series):
-        if self.canvas and series == getattr(self, "_chart_series", None):
-            return                                                              # same figures as on screen: keep the chart
-        self._chart_series = [dict(m) for m in series]
         if self.canvas:
             self.canvas.get_tk_widget().destroy()
         card, muted, border, text = T.rc(T.CARD), T.rc(T.MUTED), T.rc(T.BORDER), T.rc(T.TEXT)
@@ -194,8 +191,9 @@ class DashboardPage(Page):
         ax.legend([h[i] for i in order], [l[i] for i in order], facecolor=card, edgecolor="none", labelcolor=text, fontsize=11, frameon=False, loc="lower center",
                   bbox_to_anchor=(0.5, 1.0), ncol=3, handlelength=1.2, columnspacing=2)
         fig.tight_layout()
-        self.canvas = smooth.embed_chart(fig, self.chart_frame, fill="x", padx=10, pady=10)
-        self.canvas.draw_idle()
+        self.canvas = FigureCanvasTkAgg(fig, master=self.chart_frame)
+        self.canvas.get_tk_widget().pack(fill="x", padx=10, pady=10)
+        self.canvas.draw()
 
     @staticmethod
     def _short(v: float) -> str:

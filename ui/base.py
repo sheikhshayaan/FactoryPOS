@@ -35,21 +35,10 @@ class Page(ctk.CTkFrame):
         head.pack(fill="x", padx=32, pady=(26, 6))
         ctk.CTkLabel(head, text=self.title, font=T.font(28, "bold"), text_color=T.TEXT).pack(anchor="w")
         if self.subtitle:
-            sub = ctk.CTkLabel(head, text=self.subtitle, text_color=T.MUTED, font=T.font(14), wraplength=920, justify="left")
-            sub.pack(anchor="w", pady=(2, 0))
-            head.bind("<Configure>", lambda e, s=sub: self._wrap(s, e.width), add="+")      # a narrow window wraps the line instead of cutting it off
+            ctk.CTkLabel(head, text=self.subtitle, text_color=T.MUTED, font=T.font(14), wraplength=920, justify="left").pack(anchor="w", pady=(2, 0))
         self.body = ctk.CTkFrame(self, fg_color="transparent")
         self.body.pack(fill="both", expand=True, padx=32, pady=(10, 20))
         self.build()
-
-    def _wrap(self, label, width_px: int):
-        try:
-            scale = float(ctk.ScalingTracker.get_widget_scaling(self)) or 1.0
-        except Exception:  # noqa: BLE001
-            scale = 1.0
-        want = max(300, min(920, int(width_px / scale) - 12))
-        if abs(int(label.cget("wraplength")) - want) > 8:
-            label.configure(wraplength=want)
 
     # --- to override
     def build(self): ...

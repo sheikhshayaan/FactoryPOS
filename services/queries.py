@@ -144,7 +144,7 @@ def employees(conn):
 
 
 def attendance(conn, period):
-    return rows(conn, "SELECT a.id, a.employee_id, e.emp_code, e.name, a.work_date, a.status, a.shift, a.clock_in, a.clock_out, a.break_minutes, a.worked_minutes, a.auto_out, a.notes "
+    return rows(conn, "SELECT a.id, e.emp_code, e.name, a.work_date, a.status, a.shift, a.clock_in, a.clock_out, a.break_minutes, a.worked_minutes, a.auto_out, a.notes "
                 "FROM attendance a JOIN employees e ON e.id=a.employee_id WHERE substr(a.work_date,1,7)=? ORDER BY a.work_date DESC, e.emp_code", (period,))
 
 

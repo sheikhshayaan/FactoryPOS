@@ -100,16 +100,13 @@ class CustomerStockDialog(_Modal):
         tot = q.customer_stock(conn, customer["id"])
         if tot:
             row = ctk.CTkFrame(pad, fg_color="transparent"); row.pack(fill="x", pady=(0, 12))
-            PER_ROW = 3                                                                 # more materials wrap onto the next row instead of running out of the window
-            for c in range(PER_ROW):
-                row.grid_columnconfigure(c, weight=1, uniform="t")
             for i, it in enumerate(tot):
-                box = surface(row); box.grid(row=i // PER_ROW, column=i % PER_ROW, sticky="nsew", padx=4, pady=4)
+                row.grid_columnconfigure(i, weight=1, uniform="t")
+                box = surface(row); box.grid(row=0, column=i, sticky="nsew", padx=4)
                 u, rl = it["base_unit"], it["roll_length_milli"]
-                st = Stat(box, it["material"], T.qty_full(it["left_milli"], u, rl)); st.pack(fill="x", padx=14, pady=(10, 2))
-                st.value.configure(wraplength=200, justify="left")                      # a long figure wraps inside its box
+                Stat(box, it["material"], T.qty_full(it["left_milli"], u, rl)).pack(fill="x", padx=14, pady=(10, 2))
                 ctk.CTkLabel(box, text=f"left  -  {T.qty_full(it['received_milli'], u, rl)} given in total", font=T.font(12), text_color=T.MUTED,
-                             anchor="w", justify="left", wraplength=190).pack(fill="x", padx=18, pady=(0, 10))
+                             anchor="w").pack(fill="x", padx=18, pady=(0, 10))
         lots = [dict(l, rec=T.qty_full(l["qty_received_milli"], l["base_unit"], l["roll_length_milli"]), left=T.qty_full(l["qty_remaining_milli"], l["base_unit"], l["roll_length_milli"]),
                      note="Receipt undone" if l["undone"] else (l["reference"] or "")) for l in q.customer_lots(conn, customer["id"])]
         t = DataTable(pad, [Col("received_on", "Date", 100), Col("material", "Material", 200), Col("rec", "Given", 130, None, "e"), Col("left", "Left", 130, None, "e"),
@@ -217,15 +214,12 @@ class PartnersPage(Page):
         self.t = RowList(self.body, [("Partner", 0, "w"), ("Capital", 150, "e"), ("Ownership", 110, "e"), ("Profit share", 120, "e")],
                          empty_text="No partners yet. Use + Add partner.", header_in_scroll=True)
         self.t.pack(fill="both", expand=True)
-        self.sel_id = None                                                          # the partner clicked in the list
         self.total = ctk.CTkLabel(self.body, text="", text_color=T.MUTED, font=T.font(13), anchor="w")
         self.total.pack(fill="x", pady=(8, 0))
 
     def refresh(self):
         rows = q.partners(self.conn)
-        if self.sel_id not in {r["id"] for r in rows}:
-            self.sel_id = None
-        self._draw_partners(rows)
+        self.t.set_rows(rows, self._render_row)
         cap = sum(r["capital_paisa"] for r in rows if r["capital_paisa"] > 0)
         self.total.configure(text=f"{len(rows)} partner{'s' if len(rows) != 1 else ''}  -  total capital {T.money(cap)}  -  capital movements are equity, never sales or expenses")
         auto = ps.share_mode(self.conn) == "ownership"
@@ -237,20 +231,12 @@ class PartnersPage(Page):
                         hover_color=T.ACCENT_HOVER if active else T.CARD_ALT, border_width=0 if active else 1,
                         state="normal" if self.mode_allowed else "disabled")
 
-    def _draw_partners(self, rows):
-        sel = self.sel_id
-        self.t.set_rows(rows, self._render_row, border=lambda r: T.ACCENT if r["id"] == sel else T.BORDER)
-
-    def _render_row(self, cells, r):
+    @staticmethod
+    def _render_row(cells, r):
         _cell(cells[0], r["name"], bold=True).pack(fill="x")
         _cell(cells[1], T.money(r["capital_paisa"]), anchor="e").pack(fill="x")
         _cell(cells[2], T.pct_bps(r["ownership_bps"]), anchor="e").pack(fill="x")
         _cell(cells[3], T.pct_bps(r["share_bps"]), anchor="e", bold=True).pack(fill="x")
-        _clickable(cells[0].master, lambda r=r: self._choose(r))
-
-    def _choose(self, row):
-        self.sel_id = row["id"]
-        self._draw_partners(self.t.rows)
 
     def _pchoices(self):
         return [(r["name"], r["id"]) for r in q.partners(self.conn)]
@@ -260,12 +246,12 @@ class PartnersPage(Page):
                   lambda v: ps.add_partner(self.conn, self.user, v["name"], v["phone"], v["joined"]))
 
     def capital(self):
-        self.form("Record capital contribution", [Field("p", "Partner", "choice", self._pchoices(), self.sel_id), Field("amount", "Amount (Rs)", "money"),
+        self.form("Record capital contribution", [Field("p", "Partner", "choice", self._pchoices()), Field("amount", "Amount (Rs)", "money"),
                                                   Field("on", "Date", "date"), Field("note", "Note")],
                   lambda v: ps.record_capital(self.conn, self.user, v["p"], v["amount"], v["on"], v["note"]))
 
     def draw(self):
-        self.form("Record partner withdrawal", [Field("p", "Partner", "choice", self._pchoices(), self.sel_id), Field("amount", "Amount (Rs)", "money"),
+        self.form("Record partner withdrawal", [Field("p", "Partner", "choice", self._pchoices()), Field("amount", "Amount (Rs)", "money"),
                                                 Field("on", "Date", "date"), Field("note", "Note")],
                   lambda v: ps.record_drawing(self.conn, self.user, v["p"], v["amount"], v["on"], v["note"]),
                   intro="A withdrawal reduces the partner's capital - and, in Automatic mode, his profit share. It is not a business expense.")

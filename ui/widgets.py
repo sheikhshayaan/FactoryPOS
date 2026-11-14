@@ -242,9 +242,6 @@ class DataTable(ctk.CTkFrame):
         out forever and froze the window."""
         if getattr(self, "_in_bar", False):
             return
-        if getattr(bar, "_last", None) == (a, b):                                           # nothing moved: skip the costly redraw
-            return
-        bar._last = (a, b)
         self._in_bar = True
         try:
             bar.set(a, b)
@@ -386,9 +383,6 @@ class Field:
     live_hint: bool = False       # reserve a hint line that a `live` callback can rewrite while the person types
 
 
-SCREEN_MARGIN = 100          # real pixels kept free below/above a dialog: the window title bar and the Windows taskbar
-
-
 class _Modal(ctk.CTkToplevel):
     def __init__(self, parent, title, width=540):
         super().__init__(parent)
@@ -415,15 +409,12 @@ class _Modal(ctk.CTkToplevel):
 
     def present(self, modal=True):
         self.update_idletasks()
-        sc = self._get_window_scaling() or 1.0                   # winfo_* are real pixels, but CTkToplevel.geometry() multiplies the size by the display scale again
-        scr_w, scr_h = self.winfo_screenwidth(), self.winfo_screenheight()
-        w = max(self.winfo_reqwidth(), min(round(self._min_w * sc), scr_w - 40))
-        h = min(self.winfo_reqheight(), max(round(300 * sc), scr_h - SCREEN_MARGIN))
+        w = max(self.winfo_reqwidth(), min(self._min_w, self.winfo_screenwidth() - 40))
+        h = min(self.winfo_reqheight(), max(300, self.winfo_screenheight() - 150))
         top = self.master.winfo_toplevel()
         x = top.winfo_rootx() + max(0, (top.winfo_width() - w) // 2)
-        lift = 2 if getattr(self, "V_CENTER", False) else 4                   # a dialog that asks for it sits in the middle of the window, the rest a little above it
-        y = max(10, min(top.winfo_rooty() + max(0, (top.winfo_height() - h) // lift), scr_h - h - 60))
-        self.geometry(f"{round(w / sc)}x{round(h / sc)}+{x}+{y}")   # size in the app's own units, position in real pixels
+        y = max(10, min(top.winfo_rooty() + max(0, (top.winfo_height() - h) // 4), self.winfo_screenheight() - h - 90))
+        self.geometry(f"{w}x{h}+{x}+{y}")
         if modal:
             try:
                 self.wait_visibility(); self.grab_set(); self.focus_force()
@@ -777,19 +768,19 @@ class FormDialog(_Modal):
     def __init__(self, parent, title: str, fields: list[Field], on_submit: Callable[[dict], Any], *, submit_text="Save",
                  on_done: Callable[[], None] | None = None, intro: str = "", modal=True,
                  live: Callable[[dict, "FormDialog"], None] | None = None):
-        super().__init__(parent, title, 640)
+        super().__init__(parent, title)
         self.fields, self.on_submit, self.on_done, self.live = fields, on_submit, on_done, live
         self.widgets: dict[str, Any] = {}
         self.maps: dict[str, dict[str, Any]] = {}
         self.labels: dict[str, Any] = {}
         self.hints: dict[str, Any] = {}
         pad = ctk.CTkFrame(self, fg_color="transparent")
-        pad.pack(fill="both", expand=True, padx=28, pady=(18, 16))
+        pad.pack(fill="both", expand=True, padx=28, pady=24)
         ctk.CTkLabel(pad, text=title, font=T.font(21, "bold"), text_color=T.TEXT, anchor="w").pack(fill="x")
         if intro:
-            ctk.CTkLabel(pad, text=intro, text_color=T.MUTED, font=T.font(13), wraplength=560, justify="left", anchor="w").pack(fill="x", pady=(4, 0))
+            ctk.CTkLabel(pad, text=intro, text_color=T.MUTED, font=T.font(13), wraplength=480, justify="left", anchor="w").pack(fill="x", pady=(4, 0))
         # fields live in a scrollable area so a long form never runs off the screen; title and buttons stay visible
-        self.body = body = ctk.CTkScrollableFrame(pad, fg_color="transparent", width=540, height=100)
+        self.body = body = ctk.CTkScrollableFrame(pad, fg_color="transparent", width=470, height=100)
         body.pack(fill="both", expand=True)
         try:
             body._scrollbar.configure(height=10)       # its default height (200) would make every short form at least that tall
@@ -837,7 +828,7 @@ class FormDialog(_Modal):
         self.err = ctk.CTkLabel(pad, text="", text_color=T.BAD, font=T.font(13), wraplength=480, justify="left", anchor="w")
         self.err.pack(fill="x", pady=(14, 0))
         row = ctk.CTkFrame(pad, fg_color="transparent")
-        row.pack(fill="x", pady=(10, 0))
+        row.pack(fill="x", pady=(14, 0))
         self.submit_btn = make_button(row, submit_text, self.submit, "primary", width=130)
         self.submit_btn.pack(side="right")
         self.default_btn = self.submit_btn
@@ -936,7 +927,7 @@ class FormDialog(_Modal):
         if abs(self.body.cget("height") - want) > 1:
             self.body.configure(height=want)
         self.update_idletasks()
-        over = self.winfo_reqheight() - (self.winfo_screenheight() - SCREEN_MARGIN)
+        over = self.winfo_reqheight() - (self.winfo_screenheight() - 150)
         if over > 0:
             self.body.configure(height=max(100, int((inner - over) / sc)))
             self.update_idletasks()

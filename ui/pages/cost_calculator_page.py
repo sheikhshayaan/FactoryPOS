@@ -9,11 +9,13 @@ import logging
 import tkinter as tk
 
 import customtkinter as ctk
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
+from matplotlib.text import Text
 
 from services import cost_calculator as cc, settings_service as st
 from services.units import from_paisa
-from ui import smooth, theme as T
+from ui import theme as T
 from ui.base import Page
 from ui.widgets import Col, DataTable, make_button, show_error, surface
 
@@ -82,6 +84,7 @@ class Hero(ctk.CTkFrame):
     def fit(self):
         """The faded drawing is shown only when it fits beside the text; it never sits under the number."""
         try:
+            self.update_idletasks()
             room = self.winfo_width() >= self.inner.winfo_reqwidth() + 48 + 150
         except tk.TclError:
             return
@@ -330,16 +333,13 @@ class CostCalculatorPage(Page):
 
     def _resized(self):
         self._apply_layout()
-        self.after_idle(self._fit_cards)                                    # after the layout pass, without forcing one here
+        self._fit_cards()
 
     def _fit_presets(self):
         """The three preset buttons share one row when their text fits; otherwise they sit one under the other (never clipped)."""
         sc = self._scale()
         need = sum((len(b.cget("text")) * 9 + 34) for b in self.preset_btns.values()) + 16
         row = self.pre.winfo_width() / sc >= need if self.pre.winfo_width() > 1 else True
-        if row == getattr(self, "_pre_row", None):
-            return
-        self._pre_row = row
         for i, b in enumerate(self.preset_btns.values()):
             b.grid_forget()
             if row:
@@ -504,7 +504,8 @@ class CostCalculatorPage(Page):
                          "change": "Active input" if s["current"] else (f"+{cc.money(d)}" if d > 0 else f"-{cc.money(-d)}" if d < 0 else "Same"),
                          "tag": None if s["current"] else ("bad" if d > 0 else "good" if d < 0 else None)})
         self.table.set_rows(rows)
-        self.after_idle(self._fit_cards)
+        self._fit_cards()
+        self.after(30, self._fit_cards)
 
     def _fit_cards(self):
         for h in self.hero_cards:
@@ -522,11 +523,16 @@ class CostCalculatorPage(Page):
         ax = fig.add_axes([0.0, 0.0, 1.0, 1.0])
         ax.set_facecolor(T.rc(T.CARD)); ax.set_axis_off()
         if r is None:
-            ax.text(0.5, 0.5, "Press Calculate cost\nto see the split", ha="center", va="center", color=T.rc(T.MUTED), fontsize=10, fontweight="bold", transform=ax.transAxes)
+            ax.text(0.5, 0.5, "Press Calculate cost\nto see the split", ha="center", va="center", color=T.rc(T.MUTED), fontsize=10, transform=ax.transAxes)
         else:
             ax.pie([float(a) for _n, a, _p in r["shares"]], colors=[PART_COLOURS[n] for n, _a, _p in r["shares"]], startangle=90, counterclock=False,
                    wedgeprops=dict(width=0.3, edgecolor=T.rc(T.CARD), linewidth=2))
             ax.set_aspect("equal")
-        c = smooth.embed_chart(fig, self.chart_holder, fill="both", expand=True)
-        c.draw_idle()                                                       # one drawing (it was two, on a brand-new figure every Calculate)
+        c = FigureCanvasTkAgg(fig, master=self.chart_holder)
+        c.get_tk_widget().focus_set = lambda *a, **k: None
+        c.get_tk_widget().pack(fill="both", expand=True)
+        c.draw()
+        for t in fig.findobj(Text):
+            t.set_fontweight("bold")
+        c.draw()
         self.canvas = c
