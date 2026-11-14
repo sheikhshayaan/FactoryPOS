@@ -318,9 +318,9 @@ class StockUseDialog(_Modal):
         # "Counted in": paper gets a Rolls / Meters switch, every other material just shows its own unit
         r["unit_box"] = ctk.CTkFrame(f, fg_color="transparent"); r["unit_box"].pack(side="left", padx=(0, 6))
         r["unit_lbl"] = ctk.CTkLabel(r["unit_box"], text="", width=132, height=38, font=T.font(14), text_color=T.MUTED, anchor="w")
-        r["unit_seg"] = ctk.CTkComboBox(r["unit_box"], values=[self.ROLLS, self.METERS], state="readonly", width=132, height=38, font=T.font(14),
+        r["unit_seg"] = ctk.CTkComboBox(r["unit_box"], values=[self.METERS, self.ROLLS], state="readonly", width=132, height=38, font=T.font(14),
                                         dropdown_font=T.font(14), command=lambda _v: self._calc())
-        r["unit_seg"].set(self.ROLLS)
+        r["unit_seg"].set(self.METERS)                      # paper is counted in meters first; rolls are the other choice
         r["cost"] = ctk.CTkLabel(f, text="-", width=112, anchor="e", font=T.font(14), text_color=T.TEXT); r["cost"].pack(side="left", padx=(0, 6))
         r["x"] = make_button(f, "x", lambda r=r: self.drop_row(r), "ghost", width=34, height=34); r["x"].pack(side="left")
         r["note"] = ctk.CTkLabel(outer, text="", font=T.font(12), text_color=T.MUTED, anchor="w", justify="left")

@@ -113,6 +113,17 @@ class App(ctk.CTk):
         self._backup_job = None
         self.registration_ok = False                 # set by the code screen; only a NEW factory on this computer needs it
         self.start()
+        self.after(50, self._maximise)               # open maximised; tried again a little later because CustomTkinter restyles the window right after it appears
+        self.after(500, self._maximise)
+
+    def _maximise(self):
+        for how in (lambda: self.state("zoomed"), lambda: self.attributes("-zoomed", True)):     # Windows / most Linux window managers
+            try:
+                if self.state() != "zoomed":
+                    how()
+                return
+            except tk.TclError:
+                continue
 
     # ---------------------------------------------------------------- screens
     def _swap(self, frame: ctk.CTkFrame):
