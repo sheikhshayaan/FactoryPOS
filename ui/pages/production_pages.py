@@ -249,9 +249,10 @@ class CalculationDialog(_Modal):
 
 class StockUseDialog(_Modal):
     """Take several materials from stock for one entry in one go. Nothing is taken unless every line works."""
+    V_CENTER = True
 
     def __init__(self, parent, conn, user, job, mats, *, on_done):
-        super().__init__(parent, f"Use stock for {job['job_no']}", 820)
+        super().__init__(parent, f"Use stock for {job['job_no']}", 1020)
         self.conn, self.user, self.job, self.on_done = conn, user, job, on_done
         self.cust_fabric = job["fabric_source"] == "customer"
         self.mats = {}
@@ -277,24 +278,27 @@ class StockUseDialog(_Modal):
         ctk.CTkLabel(pad, text=("Add every material this entry used. Anything the customer gave (fabric, ink, paper) is taken from his own stock at zero cost; if the factory's own stock was used too, "
                                 "add it from the 'in factory stock' line." if self.cust_fabric
                                 else "Add every material this entry used. Factory stock leaves inventory at its average cost; what this customer gave (fabric, ink, paper) is listed as '(customer's own)' at zero cost."),
-                     font=T.font(13), text_color=T.MUTED, anchor="w", wraplength=620, justify="left").pack(fill="x", pady=(2, 10))
+                     font=T.font(13), text_color=T.MUTED, anchor="w", wraplength=900, justify="left").pack(fill="x", pady=(2, 10))
         hdr = ctk.CTkFrame(pad, fg_color="transparent"); hdr.pack(fill="x", padx=(14, 0))
         ctk.CTkLabel(hdr, text="Material", font=T.font(12), text_color=T.MUTED, anchor="w").pack(side="left", fill="x", expand=True, padx=(0, 6))
-        for txt, w in (("Quantity", 100), ("Counted in", 132), ("Cost (approx.)", 112)):
-            ctk.CTkLabel(hdr, text=txt, font=T.font(12), text_color=T.MUTED, anchor="w", width=w).pack(side="left", padx=(0, 6))
+        for txt, w, an in (("Quantity", 100, "w"), ("Counted in", 132, "w"), ("Cost (approx.)", 112, "e")):
+            ctk.CTkLabel(hdr, text=txt, font=T.font(12), text_color=T.MUTED, anchor=an, width=w).pack(side="left", padx=(0, 6))
         ctk.CTkLabel(hdr, text="", width=34).pack(side="left")
-        self.box = ctk.CTkScrollableFrame(pad, fg_color="transparent", width=640, height=150)
-        self.box.pack(fill="x")
-        self.box._scrollbar.configure(height=10)             # the scrollbar's own default height (200) would otherwise be the minimum
-        make_button(pad, "+ Add another material", self.add_row, "ghost", width=190).pack(anchor="w", pady=(6, 0))
-        dr = ctk.CTkFrame(pad, fg_color="transparent"); dr.pack(fill="x", pady=(12, 0))
+        ctk.CTkLabel(hdr, text="", width=16).pack(side="left")                        # room for the list's scroll bar
+        # The footer (add button, date, error, buttons) is packed to the BOTTOM first, so on a small screen it is the list in the middle that gets
+        # shorter (it scrolls) - the buttons are never pushed off the window.
+        row = ctk.CTkFrame(pad, fg_color="transparent"); row.pack(side="bottom", fill="x", pady=(10, 0))
+        self.go_btn = self.default_btn = make_button(row, "Take from stock", self.submit, "primary", width=160); self.go_btn.pack(side="right")
+        make_button(row, "Cancel", self.destroy, "ghost", width=90).pack(side="right", padx=8)
+        self.err = ctk.CTkLabel(pad, text="", text_color=T.BAD, font=T.font(13), wraplength=900, justify="left", anchor="w"); self.err.pack(side="bottom", fill="x", pady=(10, 0))
+        dr = ctk.CTkFrame(pad, fg_color="transparent"); dr.pack(side="bottom", fill="x", pady=(12, 0))
         ctk.CTkLabel(dr, text="Date", font=T.font(13), text_color=T.MUTED, width=60, anchor="w").pack(side="left")
         self.on = DateField(dr, date.today(), width=230); self.on.pack(side="left")
         self.total = ctk.CTkLabel(dr, text="", font=T.font(16, "bold"), text_color=T.TEXT); self.total.pack(side="right")
-        self.err = ctk.CTkLabel(pad, text="", text_color=T.BAD, font=T.font(13), wraplength=620, justify="left", anchor="w"); self.err.pack(fill="x", pady=(10, 0))
-        row = ctk.CTkFrame(pad, fg_color="transparent"); row.pack(fill="x", pady=(10, 0))
-        self.go_btn = self.default_btn = make_button(row, "Take from stock", self.submit, "primary", width=160); self.go_btn.pack(side="right")
-        make_button(row, "Cancel", self.destroy, "ghost", width=90).pack(side="right", padx=8)
+        make_button(pad, "+ Add another material", self.add_row, "ghost", width=190).pack(side="bottom", anchor="w", pady=(6, 0))
+        self.box = ctk.CTkScrollableFrame(pad, fg_color="transparent", width=100, height=150)
+        self.box.pack(fill="both", expand=True)
+        self.box._scrollbar.configure(height=10)             # the scrollbar's own default height (200) would otherwise be the minimum
         self.add_row()
         self.present(True)
 
@@ -318,9 +322,9 @@ class StockUseDialog(_Modal):
         # "Counted in": paper gets a Rolls / Meters switch, every other material just shows its own unit
         r["unit_box"] = ctk.CTkFrame(f, fg_color="transparent"); r["unit_box"].pack(side="left", padx=(0, 6))
         r["unit_lbl"] = ctk.CTkLabel(r["unit_box"], text="", width=132, height=38, font=T.font(14), text_color=T.MUTED, anchor="w")
-        r["unit_seg"] = ctk.CTkComboBox(r["unit_box"], values=[self.ROLLS, self.METERS], state="readonly", width=132, height=38, font=T.font(14),
+        r["unit_seg"] = ctk.CTkComboBox(r["unit_box"], values=[self.METERS, self.ROLLS], state="readonly", width=132, height=38, font=T.font(14),
                                         dropdown_font=T.font(14), command=lambda _v: self._calc())
-        r["unit_seg"].set(self.ROLLS)
+        r["unit_seg"].set(self.METERS)                      # paper is counted in meters first; rolls are the other choice
         r["cost"] = ctk.CTkLabel(f, text="-", width=112, anchor="e", font=T.font(14), text_color=T.TEXT); r["cost"].pack(side="left", padx=(0, 6))
         r["x"] = make_button(f, "x", lambda r=r: self.drop_row(r), "ghost", width=34, height=34); r["x"].pack(side="left")
         r["note"] = ctk.CTkLabel(outer, text="", font=T.font(12), text_color=T.MUTED, anchor="w", justify="left")
@@ -329,7 +333,9 @@ class StockUseDialog(_Modal):
         self._resize_box()
 
     def _resize_box(self):
-        self.box.configure(height=min(300, 64 * len(self.rows) + 10))
+        sc = self._get_window_scaling() or 1.0
+        room = int(self.winfo_screenheight() / sc) - 100 - 330                         # screen minus the title, header, footer and the window frame
+        self.box.configure(height=max(150, min(74 * len(self.rows) + 14, room)))       # every line is shown; the list scrolls only when the screen has no more room
         self.present(False)
 
     def drop_row(self, r):
@@ -548,7 +554,8 @@ class MachinesPage(Page):
                       lambda v: ms.set_hourly_rate(self.conn, self.user, r["id"], v["r"]), intro="Used to ESTIMATE electricity cost per job run. Leave blank to clear.")
 
     def reading(self):
-        self.form("Add meter reading", [Field("m", "Machine", "choice", self._mach()), Field("at", "Date/time", default=date.today().isoformat()), Field("k", "Cumulative kWh on the meter")],
+        sel = self.t.selected()                                                   # the machine selected on the Machines tab starts selected here
+        self.form("Add meter reading", [Field("m", "Machine", "choice", self._mach(), sel["id"] if sel else ""), Field("at", "Date/time", default=date.today().isoformat()), Field("k", "Cumulative kWh on the meter")],
                   lambda v: ms.add_meter_reading(self.conn, self.user, v["m"], v["at"], v["k"]))
 
     def bill(self):

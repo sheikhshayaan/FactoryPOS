@@ -37,3 +37,15 @@ def _no_registration_gate(monkeypatch):
     from services import registration_service
     monkeypatch.setattr(registration_service, "REGISTER_URL", "")
     monkeypatch.setattr(registration_service, "REGISTER_SECRET", "")
+
+
+@pytest.fixture(autouse=True)
+def _no_prewarm(monkeypatch):
+    """Pages are built when a test opens them, not in the background."""
+    try:
+        from ui import app as appmod
+        monkeypatch.setattr(appmod.MainScreen, "PREWARM", False)
+        from ui.pages import insights_page
+        monkeypatch.setattr(insights_page.InsightsPage, "STAGGER", False)
+    except Exception:  # noqa: BLE001 - no display / no tkinter: UI tests are skipped anyway
+        pass

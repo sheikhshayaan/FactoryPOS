@@ -260,7 +260,7 @@ def test_production_entry_use_stock_and_calculation(app):
     page.refresh(); app.update()
     _select(page, page.t, "job_no", "P-0002", app)
     page.consume(); app.update()
-    use_stock(app, [("Paper", "1.5")])
+    use_stock(app, [("Paper", "1.5", "Rolls")])
     page.refresh(); app.update()
     row = next(r for r in page.t.rows if r["job_no"] == "P-0002")
     assert row["cost_paisa"] == 750000 and row["bill_status"] == "none"          # 1.5 rolls x Rs 5,000 = Rs 7,500
@@ -284,7 +284,7 @@ def test_use_several_materials_at_once_and_all_or_nothing(app):
     submit(app, no="P-0002", od="2026-08-02", cus=cust, prod="Bedsheet", pcs="10", src="factory", notes="")
     page.refresh(); _select(page, page.t, "job_no", "P-0002", app)
     page.consume(); app.update()
-    d = use_stock(app, [("Paper", "1"), ("Ink", "5")])                                                     # ink: only 1 L exists
+    d = use_stock(app, [("Paper", "1", "Rolls"), ("Ink", "5")])                                                     # ink: only 1 L exists
     assert d.winfo_exists() and "Line 2" in d.err.cget("text")
     assert inv.stock_summary(conn, next(m["id"] for m in q.materials(conn) if m["name"] == "Paper"))["factory_qty"] == 6   # nothing was taken
     d.rows[1]["qty"].delete(0, "end"); d.rows[1]["qty"].insert(0, "0.2")
@@ -302,7 +302,7 @@ def test_create_invoice_applies_the_customers_advance(app):
     cust = next(c["id"] for c in q.customers(conn))
     submit(app, no="P-0002", od="2026-08-02", cus=cust, prod="Bedsheet", pcs="50", src="factory", notes="")
     page.refresh(); _select(page, page.t, "job_no", "P-0002", app)
-    page.consume(); app.update(); use_stock(app, [("Paper", "1.5")])                                       # cost Rs 7,500
+    page.consume(); app.update(); use_stock(app, [("Paper", "1.5", "Rolls")])                                       # cost Rs 7,500
     app.show("customers"); app.update()
     cp = app.screen.page_cache["customers"]
     _select(cp, cp.t, "name", "Ali Traders", app)
@@ -780,7 +780,7 @@ def test_production_edit_return_and_delete_entry(app, monkeypatch):
     assert conn.execute("SELECT product_type, quantity_pieces FROM jobs WHERE job_no='P-0003'").fetchone()[:] == ("Quilt cover", 25)
     _select(page, page.t, "job_no", "P-0003", app)
     page.consume(); app.update()
-    use_stock(app, [("Paper", "1")], on="2026-08-03")
+    use_stock(app, [("Paper", "1", "Rolls")], on="2026-08-03")
     _select(page, page.t, "job_no", "P-0003", app)
     before = inv.stock_summary(conn, pid)["factory_qty"]
     page.delete(); app.update()                                                            # stock still out -> refused, nothing deleted

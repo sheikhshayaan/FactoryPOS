@@ -172,6 +172,14 @@ class InventoryPage(Page):
     # ------------------------------------------------------------------ receiving
     KINDS = [("Fabric (kapra)", "fabric"), ("Ink", "ink"), ("Paper", "paper"), ("Other", "consumable")]
 
+    def _picked(self, mats, kinds):
+        """(kind, material id) to start a form on: the material selected in the Stock table, else the first kind (nothing is forced)."""
+        r = self.t.selected()
+        m = self.mats.get(r["id"]) if r else None
+        if m is not None and any(k[1] == m["category"] for k in kinds):
+            return m["category"], m["id"]
+        return kinds[0][1], None
+
     def _kind_choices(self, mats):
         """The kinds that have at least one material, so the list never offers an empty choice."""
         have = {m["category"] for m in mats}
@@ -253,10 +261,10 @@ class InventoryPage(Page):
                 inv.receive_stock(self.conn, self.user, rolls=parse_rolls(v["qty"]), unit_price=price, **kw)
             else:
                 inv.receive_stock(self.conn, self.user, qty=v["qty"], unit_price=price, roll_length=(v["rl"] or None) if m["category"] == "paper" else None, **kw)
-        first = kinds[0][1]
+        first, pick = self._picked(mats, kinds)
         self.form("Receive stock", [
             Field("kind", "What are you receiving?", "choice", kinds, first),
-            Field("mat", "Material", "choice", self._mat_choices(mats, first)),
+            Field("mat", "Material", "choice", self._mat_choices(mats, first), pick),
             Field("own", "Whose stock is it?", "choice", [("The factory's (bought)", "factory"), ("Customer's own", "customer")]),
             Field("cus", "Customer", "choice", cus),
             Field("qty", "Quantity received"),
@@ -316,10 +324,10 @@ class InventoryPage(Page):
                 raise ValueError("Choose the supplier it goes back to.")
             inv.issue_stock(self.conn, self.user, material_id=v["mat"], qty=v["qty"], movement_type=v["type"], ownership=v["own"], customer_id=v["cus"] if theirs else None,
                             reason=v["reason"], on_date=v["on"], supplier_id=v["sup"] if ret else None, unit="m" if (m["category"] == "paper" and v["unit"] == "m") else None)
-        first = kinds[0][1]
+        first, pick = self._picked(mats, kinds)
         self.form("Wastage / adjustment / supplier return", [
             Field("kind", "What is it?", "choice", kinds, first),
-            Field("mat", "Material", "choice", self._mat_choices(mats, first)),
+            Field("mat", "Material", "choice", self._mat_choices(mats, first), pick),
             Field("type", "Type", "choice", [("Wastage", "wastage"), ("Stock adjustment (loss)", "adjustment_out"), ("Return to supplier", "supplier_return")]),
             Field("sup", "Supplier it goes back to", "choice", sup),
             Field("own", "Whose stock is it?", "choice", [("The factory's", "factory"), ("Customer's own", "customer")]),

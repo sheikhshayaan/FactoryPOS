@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 import json
 import logging.handlers
+import threading
 import time
 import tkinter as tk
 from tkinter import filedialog
@@ -16,7 +17,7 @@ from database.connection import DatabaseError
 from services import auth_service as auth, backup_service as bk, payroll_service as pr, settings_service
 from services import registration_service as reg
 from services.startup import initialize_new_database, open_database
-from ui import theme as T
+from ui import smooth, theme as T
 from ui.base import Context
 from ui.widgets import Message, confirm, make_button, restyle, run_bg, show_error, show_info
 
@@ -83,6 +84,20 @@ def save_mode(paths: AppPaths, mode: str):
         log.info("could not save theme preference")
 
 
+smooth.install()                                   # before any widget exists
+
+
+def _warm_charts():
+    """Load the chart library (and its font list) in the background right after sign-in, so the first Dashboard / Insights / Cost Calculator
+    visit does not wait for it (about a second). Never raises."""
+    try:
+        from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg  # noqa: F401
+        from matplotlib.figure import Figure
+        f = Figure(figsize=(1, 1)); f.text(0.5, 0.5, "x", fontweight="bold"); f.draw_without_rendering()
+    except Exception:  # noqa: BLE001
+        pass
+
+
 class App(ctk.CTk):
 
     def report_callback_exception(self, exc, val, tb):
@@ -102,8 +117,8 @@ class App(ctk.CTk):
         setup_logging(self.paths)
         self.ctx = Context(self.paths)
         self.title("Factory Management System")
-        self.geometry("1360x840")
-        self.minsize(1280, 680)
+        self._fit_to_screen()
+        smooth.watch(self)
         self.configure(fg_color=T.BG)
         restyle(self)
         self.protocol("WM_DELETE_WINDOW", self.on_close)
@@ -113,6 +128,26 @@ class App(ctk.CTk):
         self._backup_job = None
         self.registration_ok = False                 # set by the code screen; only a NEW factory on this computer needs it
         self.start()
+
+    def _fit_to_screen(self):
+        """Open maximised where the system allows it, and never taller or wider than the screen (a 1366x768 laptop, or Windows display scaling
+        of 125-150%, used to push the bottom of the window off the screen). The smallest allowed window is small enough for those screens."""
+        try:
+            sc = float(ctk.ScalingTracker.get_window_scaling(self)) or 1.0
+        except Exception:  # noqa: BLE001
+            sc = 1.0
+        sw, sh = int(self.winfo_screenwidth() / sc), int(self.winfo_screenheight() / sc)
+        self.minsize(min(1100, sw), min(600, max(sh - 90, 480)))
+        self.geometry(f"{min(1360, sw - 20)}x{min(840, sh - 80)}+10+10")
+        self.after(50, self._maximise)
+
+    def _maximise(self):
+        for how in (lambda: self.state("zoomed"), lambda: self.attributes("-zoomed", True)):      # Windows / most Linux window managers
+            try:
+                how()
+                return
+            except tk.TclError:
+                continue
 
     # ---------------------------------------------------------------- screens
     def _swap(self, frame: ctk.CTkFrame):
@@ -142,6 +177,8 @@ class App(ctk.CTk):
         self._swap(MainScreen(self, self))
         self.show(self.screen.first_key())              # the Dashboard for the owner; the first page this person may open for everyone else
         self._schedule_backup_check()
+        self.screen.prewarm()
+        threading.Thread(target=_warm_charts, daemon=True).start()
         if done and done["created"]:
             self.after(500, lambda: self._announce_accrual(done))
 
@@ -174,15 +211,15 @@ class App(ctk.CTk):
 
     def toggle_mode(self):
         mode = "dark" if ctk.get_appearance_mode() == "Light" else "light"
-        ctk.set_appearance_mode(mode)
+        key = self.screen.key if isinstance(self.screen, MainScreen) else None
+        if isinstance(self.screen, MainScreen):
+            self.screen.destroy(); self.screen = None; self.pages.clear()    # BEFORE the colour switch: CustomTkinter would otherwise recolour
+        ctk.set_appearance_mode(mode)                                            # every widget of every opened page (seconds) just to throw them away
         save_mode(self.paths, mode)
         restyle(self)
-        if isinstance(self.screen, MainScreen):
-            key = self.screen.key
-            self.pages.clear()
-            self.logged_in(self.ctx.user)
-            if key:
-                self.show(key)
+        if self.ctx.user is not None and self.screen is None:
+            self._swap(MainScreen(self, self))
+            self.show(key or self.screen.first_key())
 
     def refresh_current(self):
         if isinstance(self.screen, MainScreen):
@@ -190,6 +227,10 @@ class App(ctk.CTk):
 
     def _schedule_backup_check(self):
         """Daily automatic backup: checked at login and every 30 minutes; the copy runs on a worker thread."""
+        if self._backup_job:
+            self.after_cancel(self._backup_job)                  # never two checking loops at once (sign out / sign in used to stack them up)
+            self._backup_job = None
+
         def check():
             if self.ctx.user is None or self.ctx.conn is None:
                 return
@@ -517,8 +558,51 @@ class MainScreen(ctk.CTkFrame):
         make_button(row, "◐  Theme", app.toggle_mode, "ghost", width=90, height=34).pack(side="left", padx=6)
         self.content = ctk.CTkFrame(self, fg_color="transparent")
         self.content.pack(side="left", fill="both", expand=True)
+        self.side, self._side_w = side, 250
+        self.bind("<Configure>", lambda e: self._narrow_side() if e.widget is self else None, add="+")
         self.page_cache: dict[str, ctk.CTkFrame] = {}
         self.key = None
+
+    def _narrow_side(self):
+        """On a small window the menu gets a little narrower, so the page beside it keeps its room."""
+        try:
+            logical = self.winfo_width() / float(ctk.ScalingTracker.get_widget_scaling(self))
+        except Exception:  # noqa: BLE001
+            return
+        want = 250 if logical >= 1250 else 210
+        if want != self._side_w:
+            self._side_w = want
+            self.side.configure(width=want)
+
+    PREWARM = True                                   # the tests switch this off
+    PREWARM_ORDER = ["jobs", "inventory", "labor", "expenses", "customers", "suppliers", "costing", "partners", "profit", "reports", "audit", "backup",
+                     "users", "settings"]            # likely first: day-to-day pages. Dashboard is already open; Insights draws charts that depend on the width, so it is not pre-built
+
+    def prewarm(self):
+        """Build the pages the person has not opened yet, one every moment the program is idle (a few tenths of a second each), so the first click
+        on each page is instant instead of waiting for it to be built. Stops by itself on sign-out."""
+        if not self.PREWARM:
+            return
+        have = {k for k, *_ in self.nav}
+
+        def step():
+            try:
+                if not self.winfo_exists() or self.app.screen is not self:
+                    return
+            except tk.TclError:
+                return
+            todo = [k for k in self.PREWARM_ORDER if k in have and k not in self.page_cache]
+            if not todo:
+                return
+            cls = {k: c for k, _l, c, _p in self.nav}[todo[0]]
+            try:
+                self.page_cache[todo[0]] = cls(self.content, self.app)            # built, not shown: show() packs it and refreshes the data
+            except Exception as e:  # noqa: BLE001 - a page that fails here fails (visibly) when it is opened
+                log.warning("pre-building %s failed: %s", todo[0], type(e).__name__)
+                self.page_cache.pop(todo[0], None)
+                have.discard(todo[0])
+            self.after(350, step)
+        self.after(1800, step)
 
     def first_key(self) -> str | None:
         have = {n[0] for n in self.nav}

@@ -11,19 +11,28 @@ def _rs(p: int) -> str:
     return f"{from_paisa(p):,.2f}"
 
 
-def _doc(path, title_lines, table_rows, footer_lines, widths=None):
+def _doc(path, title_lines, table_rows, footer_lines, widths=None, signatures=None):
     from reportlab.lib import colors
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.styles import getSampleStyleSheet
-    from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+    from reportlab.platypus import KeepTogether, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
     st = getSampleStyleSheet()
     p = Path(path); p.parent.mkdir(parents=True, exist_ok=True)
     doc = SimpleDocTemplate(str(p), pagesize=A4, title=title_lines[0])
     story = [Paragraph(title_lines[0], st["Title"])] + [Paragraph(x, st["Normal"]) for x in title_lines[1:]] + [Spacer(1, 10)]
-    t = Table(table_rows, colWidths=widths)
+    cell = st["Normal"].clone("cell", fontSize=9, leading=11)                # long text wraps inside its cell instead of running over the next column
+    rows = [[Paragraph(c, cell) if (i and isinstance(c, str) and len(c) > 28) else c for c in r] for i, r in enumerate(table_rows)]
+    t = Table(rows, colWidths=widths)
     t.setStyle(TableStyle([("GRID", (0, 0), (-1, -1), 0.25, colors.grey), ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
                            ("ALIGN", (-1, 0), (-1, -1), "RIGHT")]))
     story += [t, Spacer(1, 10)] + [Paragraph(x, st["Normal"]) for x in footer_lines]
+    if signatures:                                                            # (text under the left line, text under the right line)
+        left, right = signatures
+        sig = Table([["", "", ""], [left, "", right]], colWidths=[190, 90, 190], rowHeights=[46, 16])
+        sig.setStyle(TableStyle([("LINEABOVE", (0, 1), (0, 1), 0.7, colors.black), ("LINEABOVE", (2, 1), (2, 1), 0.7, colors.black),
+                                 ("FONTSIZE", (0, 1), (-1, -1), 9), ("ALIGN", (0, 1), (0, 1), "LEFT"), ("ALIGN", (2, 1), (2, 1), "RIGHT"),
+                                 ("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (0, 0), (-1, -1), 0)]))
+        story += [Spacer(1, 26), KeepTogether([sig])]                         # never split from the totals onto a page of its own
     doc.build(story)
     return p
 
@@ -70,7 +79,7 @@ def invoice_pdf(conn, invoice_id: int, path) -> Path:
     for name, mine, meters_milli in _paper_used(conn, i["job_id"]):
         rows.append([_esc(f"Arz Used: {name} ({'customer' + chr(39) + 's own paper' if mine else 'factory paper'}) - {_meters(meters_milli)} m"), ""])
     foot = [f"<b>Total: {cur} {_rs(i['total_paisa'])}</b>", f"Received: {cur} {_rs(paid)}", f"<b>Balance due: {cur} {_rs(i['total_paisa'] - paid)}</b>"]
-    return _doc(path, head, rows, foot, widths=[380, 120])
+    return _doc(path, head, rows, foot, widths=[380, 120], signatures=("Signature of customer", "Signature of factory"))
 
 
 def payslip_pdf(conn, payslip_id: int, path) -> Path:
@@ -85,7 +94,7 @@ def payslip_pdf(conn, payslip_id: int, path) -> Path:
             [f"Deductions ({_esc(s['deduction_notes'])})" if s["deduction_notes"] else "Deductions", "-" + _rs(s["deductions_paisa"])],
             ["Advance recovered", "-" + _rs(s["advance_recovered_paisa"])], ["Net pay", _rs(s["net_paisa"])]]
     foot = [f"Paid so far: {cur} {_rs(paid)}", f"<b>Balance payable: {cur} {_rs(s['net_paisa'] - paid)}</b>"]
-    return _doc(path, head, rows, foot, widths=[380, 120])
+    return _doc(path, head, rows, foot, widths=[380, 120], signatures=("Signature of employee", "Signature of factory"))
 
 
 def expenses_pdf(conn, start: str | None, end: str | None, path) -> Path:

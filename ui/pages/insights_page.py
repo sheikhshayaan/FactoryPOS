@@ -1,6 +1,7 @@
 """Business Insights: this period against the one before it. Every figure and sentence comes from services.insights_service."""
 from __future__ import annotations
 
+import logging
 from datetime import date
 
 import customtkinter as ctk
@@ -8,9 +9,11 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
 
 from services import insights_service as ins, settings_service
-from ui import theme as T
+from ui import smooth, theme as T
 from ui.base import Page
 from ui.widgets import Col, DataTable, DateField, make_button, surface
+
+log = logging.getLogger("fms.ui")
 
 MODES = [("Month vs month", "month"), ("Quarter vs quarter", "quarter"), ("Year vs year", "year"), ("Pick dates", "custom")]
 # one calm palette for every chart (readable on the light and the dark theme)
@@ -38,6 +41,7 @@ class InsightsPage(Page):
     # ------------------------------------------------------------------ layout
     def build(self):
         self.kind, self.offset, self.data, self._drawn_w, self._job = "month", 0, None, 0, None
+        self._painted = None                                                   # the figures the charts on screen were drawn from
         self.canvases: dict[str, FigureCanvasTkAgg] = {}
         bar = self.toolbar()
         self.seg = ctk.CTkSegmentedButton(bar, values=[m[0] for m in MODES], command=self._pick, font=T.font(14), height=38)
@@ -178,10 +182,13 @@ class InsightsPage(Page):
         if self.kind == "custom":
             n = d["periods"]["cur"]["days"]
             self.crow_msg.configure(text=f"{n} day{'' if n == 1 else 's'}, compared with the {n} day{'' if n == 1 else 's'} just before.", text_color=T.MUTED)
+        same = self._painted is not None and d == self._painted and abs(self.body.winfo_width() - self._drawn_w) <= 40
         self.data = d
         self.b_next.configure(state="normal" if self.offset < 0 else "disabled")
         self._fill(d)
-        self._paint()
+        if not same:                                                           # visiting the page again with unchanged figures keeps the charts as they are
+            self._paint()
+            self._painted = d
 
     # ------------------------------------------------------------------ texts and tables
     @staticmethod
@@ -310,14 +317,9 @@ class InsightsPage(Page):
             if self.focus_get() is old.get_tk_widget():
                 self.focus_set()                                              # never leave the keyboard focus on a chart that is about to be closed
             old.get_tk_widget().destroy()
-        c = FigureCanvasTkAgg(fig, master=holder)
-        c.get_tk_widget().focus_set = lambda *a, **k: None                    # charts do not need the keyboard; matplotlib would otherwise grab the focus
-        c.get_tk_widget().pack(fill="x", padx=6, pady=6)
-        c.draw()                                                              # makes the tick labels exist, so they can be bolded too
-        from matplotlib.text import Text
-        for t in fig.findobj(Text):
-            t.set_fontweight("bold")
-        c.draw()
+        c = smooth.embed_chart(fig, holder, fill="x", padx=6, pady=6)
+        smooth.bold_all_text(fig)
+        c.draw_idle()                                                         # one real drawing (it used to be four per chart)
         self.canvases[key] = c
 
     def _fig(self, w, h):
@@ -345,7 +347,32 @@ class InsightsPage(Page):
         fig.legend([Patch(color=c) for c in colors], labels, loc="center left", bbox_to_anchor=(0.48, 0.5), frameon=False, labelcolor=T.rc(T.TEXT), fontsize=10,
                    handlelength=1.1, labelspacing=0.8)
 
+    STAGGER = True                                                             # the tests draw everything at once
+
     def _paint(self):
+        """Draw the six charts one after the other (a moment apart), so the page and its figures show at once and the program never freezes
+        for the whole second that six charts take."""
+        self._paint_token = getattr(self, "_paint_token", 0) + 1
+        token, steps = self._paint_token, self._paint_steps()
+
+        def run():
+            if token != self._paint_token:
+                return                                                         # a newer drawing replaced this one
+            try:
+                next(steps)
+            except StopIteration:
+                return
+            except Exception as e:  # noqa: BLE001 - a chart problem must not break the page
+                log.warning("insights chart failed: %s: %s", type(e).__name__, e)
+                return
+            self.after(1, run)
+        if not self.STAGGER:
+            for _ in steps:
+                pass
+            return
+        run()
+
+    def _paint_steps(self):
         d = self.data
         if not d:
             return
@@ -379,6 +406,7 @@ class InsightsPage(Page):
         top = max([*cv, *pv, 1]); ax.set_ylim(min([*cv, *pv, 0]) * 1.25, top * 1.4)
         ax.legend(frameon=False, labelcolor=text, fontsize=10, loc="upper left", ncol=2)
         fig.tight_layout(); self._put("bars", self.f_bars, fig)
+        yield
 
         # 2. month by month: sales bars, costs bars, net profit dots
         fig = self._fig(half, 3.9); ax = fig.add_subplot(111); self._style(ax)
@@ -399,6 +427,7 @@ class InsightsPage(Page):
         else:
             ax.axis("off"); self._empty(fig, "No sales or costs in these months yet")
         fig.tight_layout(); self._put("trend", self.f_trend, fig)
+        yield
 
         # 3. where each rupee of sales goes
         fig = self._fig(half, 3.0)
@@ -411,6 +440,7 @@ class InsightsPage(Page):
         else:
             self._empty(fig, "No sales in this period yet" if cur["sales_paisa"] <= 0 else "Costs are higher than sales: no profit to show")
         self._put("split", self.f_split, fig)
+        yield
 
         # 4. assets won back
         fig = self._fig(half, 3.0); p = d["payback"]
@@ -422,6 +452,7 @@ class InsightsPage(Page):
         else:
             self._empty(fig, "No assets recorded yet")
         self._put("pay", self.f_pay, fig)
+        yield
 
         # 5. expenses this period: donut by kind
         fig = self._fig(half, 3.3)
@@ -434,6 +465,7 @@ class InsightsPage(Page):
         else:
             self._empty(fig, "No expenses in this period")
         self._put("exp", self.f_exp, fig)
+        yield
 
         # 6. expenses: each kind, both periods (horizontal)
         fig = self._fig(half, 3.3); ax = fig.add_subplot(111); self._style(ax); ax.grid(axis="x", color=border, lw=0.6, alpha=0.8); ax.grid(axis="y", visible=False)
@@ -449,3 +481,4 @@ class InsightsPage(Page):
         else:
             ax.axis("off"); self._empty(fig, "No expenses to compare")
         fig.tight_layout(); self._put("exp_bars", self.f_exp_bars, fig)
+        yield
